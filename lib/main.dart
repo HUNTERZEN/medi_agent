@@ -218,7 +218,8 @@ class _MediAgentAppState extends State<MediAgentApp> {
     try {
       Position? position = await _getCurrentLocation();
       var response = await http.post(
-        Uri.parse('http://10.119.83.68:8000/chat'),
+        // UPDATED URL HERE:
+        Uri.parse('https://medi-agent-ser.onrender.com/chat'),
         headers: {"Content-Type": "application/json"},
         body: json.encode({
           "prompt": _chatController.text,
@@ -233,7 +234,7 @@ class _MediAgentAppState extends State<MediAgentApp> {
         });
       }
     } catch (e) {
-      setState(() => _result = "## Something went wrong\nI couldn't process your question right now. Please check your connection and try again.");
+      setState(() => _result = "## Something went wrong\nI couldn't process your question right now. Please check your connection and try again. Error: $e");
     } finally {
       setState(() => _isLoading = false);
     }
@@ -251,7 +252,8 @@ class _MediAgentAppState extends State<MediAgentApp> {
     try {
       Position? position = await _getCurrentLocation();
       var request = http.MultipartRequest(
-          'POST', Uri.parse('http://10.119.83.68:8000/analyze'));
+          // UPDATED URL HERE:
+          'POST', Uri.parse('https://medi-agent-ser.onrender.com/analyze'));
       request.fields['lat'] = position?.latitude.toString() ?? "";
       request.fields['lng'] = position?.longitude.toString() ?? "";
       for (var img in images) {
