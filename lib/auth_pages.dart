@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'dart:convert';
+import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -144,7 +145,7 @@ class _AuthPagesState extends State<AuthPages>
           "email": _emailController.text.trim().toLowerCase(),
           "password": _passwordController.text,
         }),
-      );
+      ).timeout(const Duration(seconds: 60)); // Longer timeout for cold starts
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -174,7 +175,7 @@ class _AuthPagesState extends State<AuthPages>
           "email": _emailController.text.trim().toLowerCase(),
           "password": _passwordController.text,
         }),
-      );
+      ).timeout(const Duration(seconds: 60)); // Longer timeout for cold starts
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
