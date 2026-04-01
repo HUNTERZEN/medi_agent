@@ -156,8 +156,11 @@ class _AuthPagesState extends State<AuthPages>
         final body = json.decode(response.body);
         _showSnackBar(body['detail'] ?? "Registration failed", isError: true);
       }
+    } on TimeoutException {
+      _showSnackBar("Server is waking up. Please wait and try again.", isError: true);
     } catch (e) {
-      _showSnackBar("Could not connect to server. Please try again.", isError: true);
+      debugPrint("Sign up error: $e");
+      _showSnackBar("Error: ${e.toString().substring(0, e.toString().length > 50 ? 50 : e.toString().length)}", isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
