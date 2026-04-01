@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'auth_pages.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -85,7 +87,8 @@ class MediAgentApp extends StatefulWidget {
   State<MediAgentApp> createState() => _MediAgentAppState();
 }
 
-class _MediAgentAppState extends State<MediAgentApp> {
+class _MediAgentAppState extends State<MediAgentApp>
+    with TickerProviderStateMixin {
   String _result =
       "### Hello, I'm Dr. Medi \nYour personal AI medical assistant. Upload your reports for a detailed analysis, or ask me anything about your health — I'm here to help.";
   bool _isLoading = false;
@@ -94,6 +97,18 @@ class _MediAgentAppState extends State<MediAgentApp> {
   final List<String> _history = [];
   final TextEditingController _chatController = TextEditingController();
 
+  // ── Auth state ──
+  bool _isLoggedIn = false;
+  String _userName = '';
+  String _userEmail = '';
+  // ignore: unused_field
+  String _authProvider = ''; // Reserved for future use (shows auth method in profile)
+
+  // ── Animation controllers ──
+  late final AnimationController _menuController;
+  late final AnimationController _overlayController;
+  late final Animation<double> _overlayAnimation;
+
   bool get _isDark => widget.currentMode == ThemeMode.dark;
 
   @override
@@ -101,11 +116,29 @@ class _MediAgentAppState extends State<MediAgentApp> {
     super.initState();
     _loadSavedWallpaper();
     _loadSavedHistory();
+    _loadSavedAuth();
+
+    _menuController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+
+    _overlayController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _overlayAnimation = CurvedAnimation(
+      parent: _overlayController,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
   }
 
   @override
   void dispose() {
     _chatController.dispose();
+    _menuController.dispose();
+    _overlayController.dispose();
     super.dispose();
   }
 
@@ -140,6 +173,39 @@ class _MediAgentAppState extends State<MediAgentApp> {
       await prefs.setString('wallpaper_path', image.path);
       setState(() => _wallpaperFile = File(image.path));
     }
+  }
+
+  // ── Auth Persistence ───────────────────────────────────────
+  Future<void> _loadSavedAuth() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token != null && token.isNotEmpty) {
+      setState(() {
+        _isLoggedIn = true;
+        _userName = prefs.getString('user_name') ?? '';
+        _userEmail = prefs.getString('user_email') ?? '';
+        _authProvider = prefs.getString('auth_provider') ?? 'email';
+      });
+    }
+  }
+
+  Future<void> _handleSignOut() async {
+    // Sign out from Google if applicable
+    try {
+      await GoogleSignIn().signOut();
+    } catch (_) {}
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+    await prefs.remove('user_name');
+    await prefs.remove('user_email');
+    await prefs.remove('auth_provider');
+    setState(() {
+      _isLoggedIn = false;
+      _userName = '';
+      _userEmail = '';
+      _authProvider = '';
+    });
   }
 
   Future<void> _resetWallpaper() async {
@@ -574,27 +640,269 @@ class _MediAgentAppState extends State<MediAgentApp> {
   }
 
   // ── Menu Toggle ────────────────────────────────────────────
-  void _toggleMenu() => setState(() => _isMenuOpen = !_isMenuOpen);
+  void _toggleMenu() {
+    setState(() => _isMenuOpen = !_isMenuOpen);
+    if (_isMenuOpen) {
+      _menuController.forward(from: 0);
+      _overlayController.forward(from: 0);
+    } else {
+      _menuController.reverse();
+      _overlayController.reverse();
+    }
+  }
 
-  // ── Mini Action Button ─────────────────────────────────────
-  Widget _miniAction(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 32,
-        height: 32,
-        margin: const EdgeInsets.only(right: 4),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          color: _isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.04),
+  // ── Staggered Menu Item ────────────────────────────────────
+  Widget _staggeredMenuItem({
+    required int index,
+    required int total,
+    required Widget child,
+  }) {
+    // Each item gets a staggered delay within the overall animation
+    final double start = (index / total) * 0.4;
+    final double end = start + 0.6;
+    final curvedAnim = CurvedAnimation(
+      parent: _menuController,
+      curve: Interval(start.clamp(0.0, 1.0), end.clamp(0.0, 1.0),
+          curve: Curves.easeOutCubic),
+    );
+
+    return AnimatedBuilder(
+      animation: curvedAnim,
+      builder: (context, ch) {
+        return Transform.translate(
+          offset: Offset(0, 12 * (1 - curvedAnim.value)),
+          child: Opacity(
+            opacity: curvedAnim.value,
+            child: Transform.scale(
+              scale: 0.92 + 0.08 * curvedAnim.value,
+              alignment: Alignment.topRight,
+              child: ch,
+            ),
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+
+  // ── Dropdown Menu Overlay ──────────────────────────────────
+  Widget _buildDropMenu() {
+    final items = <Widget>[];
+    int totalItems = (_isLoggedIn ? 5 : 4) + (_wallpaperFile != null ? 1 : 0);
+    int idx = 0;
+
+    // ── User profile or Sign In ──
+    if (_isLoggedIn) {
+      items.add(_staggeredMenuItem(
+        index: idx++,
+        total: totalItems,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF007AFF), Color(0xFF5856D6)],
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    _userName.isNotEmpty ? _userName[0].toUpperCase() : '?',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _userName,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: _isDark ? Colors.white : Colors.black87,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      _userEmail,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: _isDark ? Colors.white38 : Colors.black45,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-        child: Icon(icon,
-            size: 16,
-            color: _isDark
-                ? Colors.white.withOpacity(0.7)
-                : Colors.black.withOpacity(0.5)),
+      ));
+
+      items.add(Divider(color: _isDark ? Colors.white24 : Colors.black12, height: 16));
+
+      items.add(_staggeredMenuItem(
+        index: idx++,
+        total: totalItems,
+        child: _menuItem(
+          icon: Icons.logout_rounded,
+          title: "Sign Out",
+          color: const Color(0xFFFF3B30),
+          onTap: () {
+            _toggleMenu();
+            _handleSignOut();
+          },
+        ),
+      ));
+    } else {
+      items.add(_staggeredMenuItem(
+        index: idx++,
+        total: totalItems,
+        child: _menuItem(
+          icon: Icons.login_rounded,
+          title: "Sign In / Sign Up",
+          color: const Color(0xFF007AFF),
+          onTap: () async {
+            _toggleMenu();
+            final result = await Navigator.of(context)
+                .push<bool>(_smoothPageRoute(const AuthPages()));
+            if (result == true) {
+              _loadSavedAuth();
+            }
+          },
+        ),
+      ));
+    }
+
+    items.add(Divider(color: _isDark ? Colors.white24 : Colors.black12, height: 16));
+
+    items.add(_staggeredMenuItem(
+      index: idx++,
+      total: totalItems,
+      child: _menuItem(
+        icon: Icons.history_rounded,
+        title: "Scan History",
+        onTap: () {
+          _toggleMenu();
+          _showHistory();
+        },
+      ),
+    ));
+
+    items.add(_staggeredMenuItem(
+      index: idx++,
+      total: totalItems,
+      child: _menuItem(
+        icon: Icons.photo_library_outlined,
+        title: "Change Wallpaper",
+        onTap: () {
+          _toggleMenu();
+          _pickWallpaper();
+        },
+      ),
+    ));
+
+    if (_wallpaperFile != null) {
+      items.add(_staggeredMenuItem(
+        index: idx++,
+        total: totalItems,
+        child: _menuItem(
+          icon: Icons.wallpaper_outlined,
+          title: "Reset Wallpaper",
+          onTap: () {
+            _toggleMenu();
+            _resetWallpaper();
+          },
+        ),
+      ));
+    }
+
+    items.add(_staggeredMenuItem(
+      index: idx++,
+      total: totalItems,
+      child: _menuItem(
+        icon: _isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+        title: _isDark ? "Light Mode" : "Dark Mode",
+        onTap: () {
+          _toggleMenu();
+          widget.onThemeToggle();
+        },
+      ),
+    ));
+
+    return _frostedGlass(
+      radius: 20,
+      blur: 40,
+      padding: const EdgeInsets.all(8),
+      child: SizedBox(
+        width: 220,
+        child: Column(children: items),
+      ),
+    );
+  }
+
+  // ── Smooth Page Route (slide up + fade) ────────────────────
+  Route<T> _smoothPageRoute<T>(Widget page) {
+    return PageRouteBuilder<T>(
+      transitionDuration: const Duration(milliseconds: 500),
+      reverseTransitionDuration: const Duration(milliseconds: 400),
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: Tween<double>(begin: 0.0, end: 1.0).animate(curved),
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.08),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _menuItem({required IconData icon, required String title, required VoidCallback onTap, Color? color}) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: color ?? (_isDark ? Colors.white70 : Colors.black87)),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: color != null ? FontWeight.w600 : FontWeight.w500,
+                  color: color ?? (_isDark ? Colors.white : Colors.black87),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -770,72 +1078,45 @@ class _MediAgentAppState extends State<MediAgentApp> {
                                 ],
                               ),
                             ),
-                            AnimatedSize(
-                              duration:
-                                  const Duration(milliseconds: 300),
-                              curve: Curves.easeOutCubic,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_isMenuOpen) ...[
-                                    _miniAction(
-                                        Icons.photo_library_outlined,
-                                        _pickWallpaper),
-                                    _miniAction(
-                                        Icons.wallpaper_outlined,
-                                        _resetWallpaper),
-                                    _miniAction(
-                                        Icons.history_rounded,
-                                        _showHistory),
-                                    _miniAction(
-                                      _isDark
-                                          ? Icons.light_mode_rounded
-                                          : Icons.dark_mode_rounded,
-                                      widget.onThemeToggle,
-                                    ),
-                                  ],
-                                  const SizedBox(width: 4),
-                                  GestureDetector(
-                                    onTap: _toggleMenu,
-                                    child: AnimatedContainer(
-                                      duration: const Duration(
-                                          milliseconds: 300),
-                                      width: 32,
-                                      height: 32,
-                                      decoration: BoxDecoration(
-                                        borderRadius:
-                                            BorderRadius.circular(10),
-                                        color: _isDark
-                                            ? Colors.white.withOpacity(
-                                                _isMenuOpen
-                                                    ? 0.15
-                                                    : 0.08)
-                                            : Colors.black.withOpacity(
-                                                _isMenuOpen
-                                                    ? 0.08
-                                                    : 0.04),
-                                      ),
-                                      child: AnimatedRotation(
-                                        turns:
-                                            _isMenuOpen ? 0.125 : 0,
-                                        duration: const Duration(
-                                            milliseconds: 300),
-                                        child: Icon(
-                                          _isMenuOpen
-                                              ? Icons.close_rounded
-                                              : Icons
-                                                  .more_horiz_rounded,
-                                          size: 18,
-                                          color: _isDark
-                                              ? Colors.white
-                                                  .withOpacity(0.7)
-                                              : Colors.black
-                                                  .withOpacity(0.5),
+                            // Hamburger Button with animated icon
+                            GestureDetector(
+                              onTap: _toggleMenu,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeOutCubic,
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  color: _isDark
+                                      ? Colors.white.withOpacity(_isMenuOpen ? 0.2 : 0.08)
+                                      : Colors.black.withOpacity(_isMenuOpen ? 0.1 : 0.04),
+                                ),
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 300),
+                                  switchInCurve: Curves.easeOutCubic,
+                                  switchOutCurve: Curves.easeInCubic,
+                                  transitionBuilder: (child, animation) {
+                                    return RotationTransition(
+                                      turns: Tween<double>(begin: 0.75, end: 1.0).animate(animation),
+                                      child: ScaleTransition(
+                                        scale: animation,
+                                        child: FadeTransition(
+                                          opacity: animation,
+                                          child: child,
                                         ),
                                       ),
-                                    ),
+                                    );
+                                  },
+                                  child: Icon(
+                                    _isMenuOpen ? Icons.close_rounded : Icons.menu_rounded,
+                                    key: ValueKey(_isMenuOpen),
+                                    size: 22,
+                                    color: _isDark
+                                        ? Colors.white.withOpacity(0.9)
+                                        : Colors.black.withOpacity(0.7),
                                   ),
-                                ],
+                                ),
                               ),
                             ),
                           ],
@@ -855,9 +1136,12 @@ class _MediAgentAppState extends State<MediAgentApp> {
                             child: SingleChildScrollView(
                               physics: const BouncingScrollPhysics(),
                               padding: const EdgeInsets.all(18),
-                              child: MarkdownBody(
-                                data: _result,
-                                selectable: true,
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 300),
+                                child: MarkdownBody(
+                                  key: ValueKey(_result.hashCode),
+                                  data: _result,
+                                  selectable: true,
                                 styleSheet:
                                     MarkdownStyleSheet.fromTheme(
                                             Theme.of(context))
@@ -897,6 +1181,7 @@ class _MediAgentAppState extends State<MediAgentApp> {
                                         .withOpacity(0.06),
                                     borderRadius:
                                         BorderRadius.circular(4),
+                                  ),
                                   ),
                                 ),
                               ),
@@ -1076,6 +1361,47 @@ class _MediAgentAppState extends State<MediAgentApp> {
                   ],
                 ),
               ),
+            ),
+            
+            // ── Animated Overlay Backdrop ──
+            if (_isMenuOpen)
+              AnimatedBuilder(
+                animation: _overlayAnimation,
+                builder: (context, _) {
+                  return Positioned.fill(
+                    child: GestureDetector(
+                      onTap: _toggleMenu,
+                      child: Container(
+                        color: Colors.black.withOpacity(0.35 * _overlayAnimation.value),
+                      ),
+                    ),
+                  );
+                },
+              ),
+
+            // ── Animated Menu Dropdown ──
+            AnimatedBuilder(
+              animation: _menuController,
+              builder: (context, child) {
+                final curved = CurvedAnimation(
+                  parent: _menuController,
+                  curve: Curves.easeOutCubic,
+                  reverseCurve: Curves.easeInCubic,
+                );
+                if (curved.value == 0) return const SizedBox.shrink();
+                return Positioned(
+                  top: MediaQuery.of(context).padding.top + 70,
+                  right: 16,
+                  child: Transform.scale(
+                    scale: 0.85 + 0.15 * curved.value,
+                    alignment: Alignment.topRight,
+                    child: Opacity(
+                      opacity: curved.value,
+                      child: _buildDropMenu(),
+                    ),
+                  ),
+                );
+              },
             ),
           ],
         ),

@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Personal notes/docs
+GOOGLE_SIGNIN_SETUP.md
+notimp.md
