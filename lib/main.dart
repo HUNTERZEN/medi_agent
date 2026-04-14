@@ -99,10 +99,17 @@ class _MediAgentAppState extends State<MediAgentApp>
 
   // ── Auth state ──
   bool _isLoggedIn = false;
+  bool _isGuest = false;
   String _userName = '';
   String _userEmail = '';
   // ignore: unused_field
   String _authProvider = ''; // Reserved for future use (shows auth method in profile)
+
+  // ── Guest usage limits (per day) ──
+  static const int _guestChatLimit = 3;
+  static const int _guestScanLimit = 3;
+  int _guestChatCount = 0;
+  int _guestScanCount = 0;
 
   // ── Animation controllers ──
   late final AnimationController _menuController;
@@ -124,6 +131,7 @@ class _MediAgentAppState extends State<MediAgentApp>
     _loadSavedWallpaper();
     _loadSavedHistory();
     _loadSavedAuth();
+    _loadGuestUsage();
 
     _menuController = AnimationController(
       vsync: this,
@@ -139,6 +147,9 @@ class _MediAgentAppState extends State<MediAgentApp>
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
+
+    // Show auth page on first launch if not logged in
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkFirstLaunchAuth());
   }
 
   @override
@@ -186,14 +197,130 @@ class _MediAgentAppState extends State<MediAgentApp>
   Future<void> _loadSavedAuth() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
+    final guest = prefs.getBool('is_guest') ?? false;
     if (token != null && token.isNotEmpty) {
       setState(() {
         _isLoggedIn = true;
+        _isGuest = false;
         _userName = prefs.getString('user_name') ?? '';
         _userEmail = prefs.getString('user_email') ?? '';
         _authProvider = prefs.getString('auth_provider') ?? 'email';
       });
+    } else if (guest) {
+      setState(() {
+        _isGuest = true;
+        _isLoggedIn = false;
+      });
     }
+  }
+
+  // ── First-launch auth check ────────────────────────────────
+  Future<void> _checkFirstLaunchAuth() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    final isGuest = prefs.getBool('is_guest') ?? false;
+    // If not logged in and not continuing as guest → show auth
+    if ((token == null || token.isEmpty) && !isGuest) {
+      if (!mounted) return;
+      final result = await Navigator.of(context)
+          .push<dynamic>(_smoothPageRoute(const AuthPages()));
+      if (result == true) {
+        // Logged in successfully
+        _loadSavedAuth();
+      } else if (result == 'guest') {
+        // Entered as guest
+        await prefs.setBool('is_guest', true);
+        setState(() {
+          _isGuest = true;
+          _isLoggedIn = false;
+        });
+      }
+    }
+  }
+
+  // ── Guest usage tracking ───────────────────────────────────
+  Future<void> _loadGuestUsage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedDate = prefs.getString('guest_usage_date') ?? '';
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    if (savedDate != today) {
+      // Reset daily limits
+      await prefs.setString('guest_usage_date', today);
+      await prefs.setInt('guest_chat_count', 0);
+      await prefs.setInt('guest_scan_count', 0);
+      _guestChatCount = 0;
+      _guestScanCount = 0;
+    } else {
+      _guestChatCount = prefs.getInt('guest_chat_count') ?? 0;
+      _guestScanCount = prefs.getInt('guest_scan_count') ?? 0;
+    }
+  }
+
+  Future<void> _incrementGuestChat() async {
+    _guestChatCount++;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('guest_chat_count', _guestChatCount);
+  }
+
+  Future<void> _incrementGuestScan() async {
+    _guestScanCount++;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('guest_scan_count', _guestScanCount);
+  }
+
+  bool _checkGuestChatLimit() {
+    if (!_isGuest || _isLoggedIn) return true;
+    if (_guestChatCount >= _guestChatLimit) {
+      _showGuestLimitDialog('chat');
+      return false;
+    }
+    return true;
+  }
+
+  bool _checkGuestScanLimit() {
+    if (!_isGuest || _isLoggedIn) return true;
+    if (_guestScanCount >= _guestScanLimit) {
+      _showGuestLimitDialog('scan');
+      return false;
+    }
+    return true;
+  }
+
+  void _showGuestLimitDialog(String type) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _isDark ? const Color(0xFF1C1C2E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Daily Limit Reached',
+          style: TextStyle(color: _isDark ? Colors.white : Colors.black87),
+        ),
+        content: Text(
+          'You\'ve used all your free $type${type == 'chat' ? 's' : 's'} for today.\n\nSign in to get unlimited access!',
+          style: TextStyle(color: _isDark ? Colors.white70 : Colors.black54),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Later', style: TextStyle(color: _isDark ? Colors.white54 : Colors.black45)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final result = await Navigator.of(context)
+                  .push<dynamic>(_smoothPageRoute(const AuthPages()));
+              if (result == true) {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.remove('is_guest');
+                _loadSavedAuth();
+              }
+            },
+            child: const Text('Sign In', style: TextStyle(color: Color(0xFF007AFF), fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _handleSignOut() async {
@@ -207,12 +334,18 @@ class _MediAgentAppState extends State<MediAgentApp>
     await prefs.remove('user_name');
     await prefs.remove('user_email');
     await prefs.remove('auth_provider');
+    await prefs.remove('is_guest');
     setState(() {
       _isLoggedIn = false;
+      _isGuest = false;
       _userName = '';
       _userEmail = '';
       _authProvider = '';
     });
+    // Show auth page again after sign out
+    if (mounted) {
+      _checkFirstLaunchAuth();
+    }
   }
 
   Future<void> _resetWallpaper() async {
@@ -284,6 +417,7 @@ class _MediAgentAppState extends State<MediAgentApp>
   // ── AI Chat ────────────────────────────────────────────────
   Future<void> _askAiChat() async {
     if (_chatController.text.isEmpty) return;
+    if (!_checkGuestChatLimit()) return;
     setState(() {
       _isLoading = true;
       _result = "### Give me a moment...\nI'm looking into this for you.";
@@ -301,6 +435,7 @@ class _MediAgentAppState extends State<MediAgentApp>
         }),
       );
       if (response.statusCode == 200) {
+        if (_isGuest && !_isLoggedIn) await _incrementGuestChat();
         setState(() {
           _result = json.decode(response.body)['answer'];
           _chatController.clear();
@@ -315,6 +450,7 @@ class _MediAgentAppState extends State<MediAgentApp>
 
   // ── Report Scan ────────────────────────────────────────────
   Future<void> _analyzeReport() async {
+    if (!_checkGuestScanLimit()) return;
     final picker = ImagePicker();
     final List<XFile> images = await picker.pickMultiImage();
     if (images.isEmpty) return;
@@ -336,6 +472,7 @@ class _MediAgentAppState extends State<MediAgentApp>
       var streamedResponse = await request.send();
       var response = await http.Response.fromStream(streamedResponse);
       if (response.statusCode == 200) {
+        if (_isGuest && !_isLoggedIn) await _incrementGuestScan();
         String data = json.decode(response.body)['recommendation'];
         setState(() {
           _result = data;
@@ -695,7 +832,8 @@ class _MediAgentAppState extends State<MediAgentApp>
   // ── Dropdown Menu Overlay ──────────────────────────────────
   Widget _buildDropMenu() {
     final items = <Widget>[];
-    int totalItems = (_isLoggedIn ? 5 : 4) + (_wallpaperFile != null ? 1 : 0);
+    // Adjust total count: skip scan history for guests
+    int totalItems = (_isLoggedIn ? 5 : (_isGuest ? 3 : 4)) + (_wallpaperFile != null ? 1 : 0) + (_isGuest ? 1 : 0);
     int idx = 0;
 
     // ── User profile or Sign In ──
@@ -775,6 +913,44 @@ class _MediAgentAppState extends State<MediAgentApp>
         ),
       ));
     } else {
+      // Guest mode indicator
+      if (_isGuest) {
+        items.add(_staggeredMenuItem(
+          index: idx++,
+          total: totalItems,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: _isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05),
+                  ),
+                  child: Icon(Icons.person_outline_rounded, color: _isDark ? Colors.white54 : Colors.black45, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Guest Mode', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _isDark ? Colors.white : Colors.black87)),
+                      Text(
+                        '${_guestChatLimit - _guestChatCount} chats · ${_guestScanLimit - _guestScanCount} scans left today',
+                        style: TextStyle(fontSize: 11, color: _isDark ? Colors.white38 : Colors.black45),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ));
+        items.add(Divider(color: _isDark ? Colors.white24 : Colors.black12, height: 16));
+      }
+
       items.add(_staggeredMenuItem(
         index: idx++,
         total: totalItems,
@@ -785,8 +961,10 @@ class _MediAgentAppState extends State<MediAgentApp>
           onTap: () async {
             _toggleMenu();
             final result = await Navigator.of(context)
-                .push<bool>(_smoothPageRoute(const AuthPages()));
+                .push<dynamic>(_smoothPageRoute(const AuthPages()));
             if (result == true) {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('is_guest');
               _loadSavedAuth();
             }
           },
@@ -796,18 +974,21 @@ class _MediAgentAppState extends State<MediAgentApp>
 
     items.add(Divider(color: _isDark ? Colors.white24 : Colors.black12, height: 16));
 
-    items.add(_staggeredMenuItem(
-      index: idx++,
-      total: totalItems,
-      child: _menuItem(
-        icon: Icons.history_rounded,
-        title: "Scan History",
-        onTap: () {
-          _toggleMenu();
-          _showHistory();
-        },
-      ),
-    ));
+    // Only show scan history for logged-in users, not guests
+    if (_isLoggedIn) {
+      items.add(_staggeredMenuItem(
+        index: idx++,
+        total: totalItems,
+        child: _menuItem(
+          icon: Icons.history_rounded,
+          title: "Scan History",
+          onTap: () {
+            _toggleMenu();
+            _showHistory();
+          },
+        ),
+      ));
+    }
 
     items.add(_staggeredMenuItem(
       index: idx++,

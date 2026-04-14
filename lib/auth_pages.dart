@@ -291,206 +291,214 @@ class _AuthPagesState extends State<AuthPages>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        leading: Padding(
-          padding: const EdgeInsets.all(4),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: () => Navigator.of(context).pop(),
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  color: isDark
-                      ? Colors.white.withOpacity(0.08)
-                      : Colors.black.withOpacity(0.04),
-                ),
-                child: Icon(
-                  Icons.arrow_back_ios_new_rounded,
-                  color: isDark ? Colors.white : Colors.black87,
-                  size: 18,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-      body: Stack(
-        children: [
-          // Background Gradient
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  stops: const [0.0, 0.3, 0.7, 1.0],
-                  colors: isDark
-                      ? const [
-                          Color(0xFF0A0A1A),
-                          Color(0xFF0D1B2A),
-                          Color(0xFF1B2838),
-                          Color(0xFF0A0A1A),
-                        ]
-                      : const [
-                          Color(0xFFF0F4FF),
-                          Color(0xFFE8ECF4),
-                          Color(0xFFF5F0FF),
-                          Color(0xFFEEF2F7),
-                        ],
-                ),
-              ),
-            ),
-          ),
-
-          // Ambient Orbs
-          Positioned(
-            top: -60,
-            right: -40,
-            child: Container(
-              width: 250,
-              height: 250,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(colors: [
-                  const Color(0xFF007AFF).withOpacity(isDark ? 0.3 : 0.15),
-                  Colors.transparent,
-                ]),
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: 100,
-            left: -80,
-            child: Container(
-              width: 300,
-              height: 300,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(colors: [
-                  const Color(0xFF5856D6).withOpacity(isDark ? 0.25 : 0.1),
-                  Colors.transparent,
-                ]),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 350,
-            right: -50,
-            child: Container(
-              width: 180,
-              height: 180,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(colors: [
-                  const Color(0xFF30D158).withOpacity(isDark ? 0.15 : 0.08),
-                  Colors.transparent,
-                ]),
-              ),
-            ),
-          ),
-
-          // Content with entry animation
-          Center(
-            child: SingleChildScrollView(
-              child: FadeTransition(
-                opacity: _entryFade,
-                child: SlideTransition(
-                  position: _entrySlide,
-                  child: ScaleTransition(
-                    scale: _entryScale,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // Logo
-                        Container(
-                          width: 76,
-                          height: 76,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(22),
-                            gradient: const LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [Color(0xFF007AFF), Color(0xFF5856D6)],
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF007AFF).withOpacity(0.45),
-                                blurRadius: 24,
-                                offset: const Offset(0, 10),
-                              ),
-                              BoxShadow(
-                                color: const Color(0xFF5856D6).withOpacity(0.2),
-                                blurRadius: 40,
-                                offset: const Offset(0, 16),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(Icons.medical_services_rounded,
-                              color: Colors.white, size: 38),
-                        ),
-                        const SizedBox(height: 24),
-
-                        // App Title
-                        Text(
-                          "MediAgent",
-                          style: TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.8,
-                            color: isDark ? Colors.white : const Color(0xFF1C1C1E),
-                          ),
-                        ),
-                        const SizedBox(height: 44),
-
-                        // Auth Card
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 550),
-                          switchInCurve: Curves.easeOutCubic,
-                          switchOutCurve: Curves.easeInCubic,
-                          transitionBuilder: (Widget child, Animation<double> animation) {
-                            return FadeTransition(
-                              opacity: animation,
-                              child: SlideTransition(
-                                position: Tween<Offset>(
-                                  begin: const Offset(0.0, 0.06),
-                                  end: Offset.zero,
-                                ).animate(CurvedAnimation(
-                                  parent: animation,
-                                  curve: Curves.easeOutCubic,
-                                )),
-                                child: ScaleTransition(
-                                  scale: Tween<double>(begin: 0.96, end: 1.0)
-                                      .animate(CurvedAnimation(
-                                    parent: animation,
-                                    curve: Curves.easeOutCubic,
-                                  )),
-                                  child: child,
-                                ),
-                              ),
-                            );
-                          },
-                          layoutBuilder: (Widget? current, List<Widget> previous) {
-                            return Stack(
-                              alignment: Alignment.topCenter,
-                              children: [...previous, if (current != null) current],
-                            );
-                          },
-                          child: _isLogin
-                              ? _buildLoginCard(isDark)
-                              : _buildSignUpCard(isDark),
-                        ),
-                      ],
-                    ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          Navigator.of(context).pop('guest');
+        }
+      },
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          leading: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => Navigator.of(context).pop('guest'),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: isDark
+                        ? Colors.white.withOpacity(0.08)
+                        : Colors.black.withOpacity(0.04),
+                  ),
+                  child: Icon(
+                    Icons.arrow_back_ios_new_rounded,
+                    color: isDark ? Colors.white : Colors.black87,
+                    size: 18,
                   ),
                 ),
               ),
             ),
           ),
-        ],
+        ),
+        body: Stack(
+          children: [
+            // Background Gradient
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    stops: const [0.0, 0.3, 0.7, 1.0],
+                    colors: isDark
+                        ? const [
+                            Color(0xFF0A0A1A),
+                            Color(0xFF0D1B2A),
+                            Color(0xFF1B2838),
+                            Color(0xFF0A0A1A),
+                          ]
+                        : const [
+                            Color(0xFFF0F4FF),
+                            Color(0xFFE8ECF4),
+                            Color(0xFFF5F0FF),
+                            Color(0xFFEEF2F7),
+                          ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Ambient Orbs
+            Positioned(
+              top: -60,
+              right: -40,
+              child: Container(
+                width: 250,
+                height: 250,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(colors: [
+                    const Color(0xFF007AFF).withOpacity(isDark ? 0.3 : 0.15),
+                    Colors.transparent,
+                  ]),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 100,
+              left: -80,
+              child: Container(
+                width: 300,
+                height: 300,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(colors: [
+                    const Color(0xFF5856D6).withOpacity(isDark ? 0.25 : 0.1),
+                    Colors.transparent,
+                  ]),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 350,
+              right: -50,
+              child: Container(
+                width: 180,
+                height: 180,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(colors: [
+                    const Color(0xFF30D158).withOpacity(isDark ? 0.15 : 0.08),
+                    Colors.transparent,
+                  ]),
+                ),
+              ),
+            ),
+
+            // Content with entry animation
+            Center(
+              child: SingleChildScrollView(
+                child: FadeTransition(
+                  opacity: _entryFade,
+                  child: SlideTransition(
+                    position: _entrySlide,
+                    child: ScaleTransition(
+                      scale: _entryScale,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Logo
+                          Container(
+                            width: 76,
+                            height: 76,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(22),
+                              gradient: const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [Color(0xFF007AFF), Color(0xFF5856D6)],
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF007AFF).withOpacity(0.45),
+                                  blurRadius: 24,
+                                  offset: const Offset(0, 10),
+                                ),
+                                BoxShadow(
+                                  color: const Color(0xFF5856D6).withOpacity(0.2),
+                                  blurRadius: 40,
+                                  offset: const Offset(0, 16),
+                                ),
+                              ],
+                            ),
+                            child: const Icon(Icons.medical_services_rounded,
+                                color: Colors.white, size: 38),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // App Title
+                          Text(
+                            "MediAgent",
+                            style: TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.8,
+                              color: isDark ? Colors.white : const Color(0xFF1C1C1E),
+                            ),
+                          ),
+                          const SizedBox(height: 44),
+
+                          // Auth Card
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 550),
+                            switchInCurve: Curves.easeOutCubic,
+                            switchOutCurve: Curves.easeInCubic,
+                            transitionBuilder: (Widget child, Animation<double> animation) {
+                              return FadeTransition(
+                                opacity: animation,
+                                child: SlideTransition(
+                                  position: Tween<Offset>(
+                                    begin: const Offset(0.0, 0.06),
+                                    end: Offset.zero,
+                                  ).animate(CurvedAnimation(
+                                    parent: animation,
+                                    curve: Curves.easeOutCubic,
+                                  )),
+                                  child: ScaleTransition(
+                                    scale: Tween<double>(begin: 0.96, end: 1.0)
+                                        .animate(CurvedAnimation(
+                                      parent: animation,
+                                      curve: Curves.easeOutCubic,
+                                    )),
+                                    child: child,
+                                  ),
+                                ),
+                              );
+                            },
+                            layoutBuilder: (Widget? current, List<Widget> previous) {
+                              return Stack(
+                                alignment: Alignment.topCenter,
+                                children: [...previous, if (current != null) current],
+                              );
+                            },
+                            child: _isLogin
+                                ? _buildLoginCard(isDark)
+                                : _buildSignUpCard(isDark),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -526,6 +534,8 @@ class _AuthPagesState extends State<AuthPages>
           _buildTextField(isDark, "Password", Icons.lock_outline, _passwordController, isPassword: true),
           const SizedBox(height: 28),
           _buildButton("Sign In", _isLoading ? null : _handleSignIn),
+          const SizedBox(height: 16),
+          _buildGuestButton(isDark),
           const SizedBox(height: 24),
           _buildSwitchText("Don't have an account?", "Sign Up", _toggleMode, isDark),
         ],
@@ -566,6 +576,8 @@ class _AuthPagesState extends State<AuthPages>
           _buildTextField(isDark, "Password", Icons.lock_outline, _passwordController, isPassword: true),
           const SizedBox(height: 28),
           _buildButton("Create Account", _isLoading ? null : _handleSignUp),
+          const SizedBox(height: 16),
+          _buildGuestButton(isDark),
           const SizedBox(height: 24),
           _buildSwitchText("Already have an account?", "Sign In", _toggleMode, isDark),
         ],
@@ -785,6 +797,40 @@ class _AuthPagesState extends State<AuthPages>
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  // ── Guest Button ───────────────────────────────────────────
+  Widget _buildGuestButton(bool isDark) {
+    return GestureDetector(
+      onTap: _isLoading
+          ? null
+          : () => Navigator.of(context).pop('guest'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark ? Colors.white.withOpacity(0.15) : Colors.black.withOpacity(0.1),
+          ),
+          color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.person_outline_rounded, size: 18, color: isDark ? Colors.white54 : Colors.black45),
+            const SizedBox(width: 8),
+            Text(
+              "Continue as Guest",
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            ),
+          ],
         ),
       ),
     );
