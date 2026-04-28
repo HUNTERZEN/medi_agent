@@ -11,6 +11,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
+import 'map_page.dart';
 
 // ─────────────────────────────────────────────────────────────
 //  Entry
@@ -974,7 +975,7 @@ class _MediAgentAppState extends State<MediAgentApp>
 
     items.add(Divider(color: _isDark ? Colors.white24 : Colors.black12, height: 16));
 
-    // Only show scan history for logged-in users, not guests
+    // Only show scan history and hospital map for logged-in users, not guests
     if (_isLoggedIn) {
       items.add(_staggeredMenuItem(
         index: idx++,
@@ -985,6 +986,21 @@ class _MediAgentAppState extends State<MediAgentApp>
           onTap: () {
             _toggleMenu();
             _showHistory();
+          },
+        ),
+      ));
+
+      items.add(_staggeredMenuItem(
+        index: idx++,
+        total: totalItems,
+        child: _menuItem(
+          icon: Icons.map_rounded,
+          title: "Nearest Hospitals",
+          onTap: () {
+            _toggleMenu();
+            Navigator.of(context).push(
+              _smoothPageRoute(HospitalMapPage(isDark: _isDark)),
+            );
           },
         ),
       ));
