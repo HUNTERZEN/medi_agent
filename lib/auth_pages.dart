@@ -216,7 +216,7 @@ class _AuthPagesState extends State<AuthPages>
         Uri.parse('$_baseUrl/google-auth'),
         headers: {"Content-Type": "application/json"},
         body: json.encode({"id_token": idToken}),
-      );
+      ).timeout(const Duration(seconds: 60));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);

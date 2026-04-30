@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import 'auth_pages.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:image_picker/image_picker.dart';
@@ -436,14 +437,19 @@ class _MediAgentAppState extends State<MediAgentApp>
           "lat": position?.latitude,
           "lng": position?.longitude,
         }),
-      );
+      ).timeout(const Duration(seconds: 90));
+
       if (response.statusCode == 200) {
         if (_isGuest && !_isLoggedIn) await _incrementGuestChat();
         setState(() {
           _result = json.decode(response.body)['answer'];
           _chatController.clear();
         });
+      } else {
+        setState(() => _result = "## ⚠️ Server Error\nI'm having trouble connecting to my medical database (Status: ${response.statusCode}). Please try again in a moment.");
       }
+    } on TimeoutException {
+      setState(() => _result = "## ⏱️ Connection Timeout\nThe server is taking a bit longer to wake up. Please try again.");
     } catch (e) {
       setState(() => _result = "## Something went wrong\nI couldn't process your question right now. Please check your connection and try again. Error: $e");
     } finally {
@@ -472,7 +478,7 @@ class _MediAgentAppState extends State<MediAgentApp>
         request.files
             .add(await http.MultipartFile.fromPath('files', img.path));
       }
-      var streamedResponse = await request.send();
+      var streamedResponse = await request.send().timeout(const Duration(seconds: 120));
       var response = await http.Response.fromStream(streamedResponse);
       if (response.statusCode == 200) {
         if (_isGuest && !_isLoggedIn) await _incrementGuestScan();
@@ -482,7 +488,11 @@ class _MediAgentAppState extends State<MediAgentApp>
           _history.insert(0, data);
         });
         await _saveHistory();
+      } else {
+        setState(() => _result = "## ⚠️ Analysis Error\nI couldn't complete the scan (Status: ${response.statusCode}). The server might be busy. Please try again later.");
       }
+    } on TimeoutException {
+      setState(() => _result = "## ⏱️ Scan Timeout\nAnalyzing reports can take time, but this is taking longer than usual. Please try again.");
     } catch (e) {
       setState(() => _result = "## ⚠️ Scan Error\n$e");
     } finally {
