@@ -119,16 +119,9 @@ class _MediAgentAppState extends State<MediAgentApp>
 
   bool get _isDark => widget.currentMode == ThemeMode.dark;
 
-  // ── Warm-up: wake the Render backend on app launch ────────
-  void _warmUpBackend() {
-    // Fire-and-forget — we don't care about the result, just wake the server
-    http.get(Uri.parse('https://medi-agent-ser.onrender.com/health')).ignore();
-  }
-
   @override
   void initState() {
     super.initState();
-    _warmUpBackend(); // wake backend immediately
     _loadSavedWallpaper();
     _loadSavedHistory();
     _loadSavedAuth();
