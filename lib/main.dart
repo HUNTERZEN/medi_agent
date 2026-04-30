@@ -227,15 +227,24 @@ class _MediAgentAppState extends State<MediAgentApp>
           .push<dynamic>(_smoothPageRoute(const AuthPages()));
       if (result == true) {
         // Logged in successfully
-        _loadSavedAuth();
+        await _loadSavedAuth();
+        setState(() {
+          _result = "### Welcome, $_userName! 🎉\nI'm Dr. Medi, your personal AI medical assistant. I'm glad to see you. How can I help you today?";
+        });
       } else if (result == 'guest') {
         // Entered as guest
         await prefs.setBool('is_guest', true);
         setState(() {
           _isGuest = true;
           _isLoggedIn = false;
+          _result = "### Hello! 👋\nYou're using MediAgent in Guest Mode. I can help you with up to 3 chats and 3 scans today. Sign in anytime for unlimited access!";
         });
       }
+    } else if (_isLoggedIn && _result.startsWith("### Hello, I'm Dr. Medi")) {
+      // If already logged in but still showing default greeting
+      setState(() {
+        _result = "### Welcome back, $_userName! 👋\nHow are you feeling today? I'm ready to help with your medical reports or any health questions.";
+      });
     }
   }
 
