@@ -45,14 +45,14 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
   }
 
   Future<void> _fetchNearbyHospitals(Position pos) async {
-    // We'll use the Overpass API (OpenStreetMap) to find hospitals
-    // This doesn't require an API key and is free to use.
+    setState(() => _isLoading = true);
+    // Increased radius to 10km (10000m) for better results
     final String query = """
     [out:json];
     (
-      node["amenity"="hospital"](around:5000, ${pos.latitude}, ${pos.longitude});
-      way["amenity"="hospital"](around:5000, ${pos.latitude}, ${pos.longitude});
-      relation["amenity"="hospital"](around:5000, ${pos.latitude}, ${pos.longitude});
+      node["amenity"="hospital"](around:10000, ${pos.latitude}, ${pos.longitude});
+      way["amenity"="hospital"](around:10000, ${pos.latitude}, ${pos.longitude});
+      relation["amenity"="hospital"](around:10000, ${pos.latitude}, ${pos.longitude});
     );
     out center;
     """;
@@ -67,7 +67,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
 
         setState(() {
           _markers.clear();
-          // Add current location marker
+          // Add current location marker (Azure blue)
           _markers.add(
             Marker(
               markerId: const MarkerId("current_pos"),
@@ -76,6 +76,12 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
               icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
             ),
           );
+
+          if (elements.isEmpty && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("No hospitals found within 10km of your location.")),
+            );
+          }
 
           for (var element in elements) {
             double lat = element['lat'] ?? element['center']['lat'];
@@ -93,11 +99,46 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
               ),
             );
           }
+          _isLoading = false;
         });
+        
+        // Fit all markers in view if there are hospitals
+        if (elements.isNotEmpty && _mapController != null) {
+          _fitMarkers();
+        }
+      } else {
+        setState(() => _isLoading = false);
       }
     } catch (e) {
       debugPrint("Error fetching hospitals: $e");
+      setState(() => _isLoading = false);
     }
+  }
+
+  void _fitMarkers() {
+    if (_markers.isEmpty) return;
+    
+    double minLat = _markers.first.position.latitude;
+    double maxLat = _markers.first.position.latitude;
+    double minLon = _markers.first.position.longitude;
+    double maxLon = _markers.first.position.longitude;
+
+    for (var m in _markers) {
+      if (m.position.latitude < minLat) minLat = m.position.latitude;
+      if (m.position.latitude > maxLat) maxLat = m.position.latitude;
+      if (m.position.longitude < minLon) minLon = m.position.longitude;
+      if (m.position.longitude > maxLon) maxLon = m.position.longitude;
+    }
+
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(minLat, minLon),
+          northeast: LatLng(maxLat, maxLon),
+        ),
+        50.0, // Padding
+      ),
+    );
   }
 
   @override
