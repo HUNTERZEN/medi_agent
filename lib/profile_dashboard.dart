@@ -82,23 +82,32 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          _displayName = data['name'] ?? widget.userName;
-          _age = data['age'].toString().isNotEmpty ? data['age'] : "--";
-          _weight = data['weight'].toString().isNotEmpty ? data['weight'] : "--";
-          _height = data['height'].toString().isNotEmpty ? data['height'] : "--";
-          _heartRate = data['heart_rate'].toString().isNotEmpty ? data['heart_rate'] : "--";
-          _sleep = data['sleep'].toString().isNotEmpty ? data['sleep'] : "--";
-          _steps = data['steps'].toString().isNotEmpty ? data['steps'] : "0";
+          _displayName = data['name']?.toString() ?? widget.userName;
+          
+          // Safe conversion for numerical fields
+          _age = (data['age'] != null && data['age'].toString().isNotEmpty) ? data['age'].toString() : "--";
+          _weight = (data['weight'] != null && data['weight'].toString().isNotEmpty) ? data['weight'].toString() : "--";
+          _height = (data['height'] != null && data['height'].toString().isNotEmpty) ? data['height'].toString() : "--";
+          _heartRate = (data['heart_rate'] != null && data['heart_rate'].toString().isNotEmpty) ? data['heart_rate'].toString() : "--";
+          _steps = (data['steps'] != null && data['steps'].toString().isNotEmpty) ? data['steps'].toString() : "0";
+          
+          _sleep = data['sleep']?.toString() ?? "--";
+          if (_sleep.isEmpty) _sleep = "--";
+
           _emailNotifications = data['email_notifications'] ?? true;
           _pushNotifications = data['push_notifications'] ?? true;
           _publicProfile = data['public_profile'] ?? false;
           _twoFactorAuth = data['two_factor_auth'] ?? false;
           _isLoading = false;
         });
+      } else {
+        setState(() => _isLoading = false);
       }
     } catch (e) {
       debugPrint("Error fetching profile: $e");
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -121,10 +130,22 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
             const SnackBar(content: Text("Settings updated successfully!")),
           );
         }
+      } else {
+        setState(() => _isLoading = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Failed to update profile. Please try again.")),
+          );
+        }
       }
     } catch (e) {
       debugPrint("Error updating profile: $e");
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("An error occurred. Please check your connection.")),
+        );
+      }
     }
   }
 
@@ -141,9 +162,9 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
   void _showEditDialog() {
     final nameController = TextEditingController(text: _displayName);
     final ageController = TextEditingController(text: _age == "--" ? "" : _age);
-    final weightController = TextEditingController(text: _weight == "--" ? "" : _weight);
-    final heightController = TextEditingController(text: _height == "--" ? "" : _height);
-    final hrController = TextEditingController(text: _heartRate == "--" ? "" : _heartRate);
+    final weightController = TextEditingController(text: _weight == "--" ? "" : _weight.replaceAll('kg', ''));
+    final heightController = TextEditingController(text: _height == "--" ? "" : _height.replaceAll('cm', ''));
+    final hrController = TextEditingController(text: _heartRate == "--" ? "" : _heartRate.replaceAll(' bpm', ''));
     final sleepController = TextEditingController(text: _sleep == "--" ? "" : _sleep);
     final stepsController = TextEditingController(text: _steps == "0" ? "" : _steps);
 
@@ -157,12 +178,12 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildEditField("Name", nameController),
-              _buildEditField("Age", ageController),
-              _buildEditField("Weight (kg)", weightController),
-              _buildEditField("Height (cm)", heightController),
-              _buildEditField("Heart Rate (bpm)", hrController),
-              _buildEditField("Sleep (h/m)", sleepController),
-              _buildEditField("Daily Steps", stepsController),
+              _buildEditField("Age", ageController, keyboardType: TextInputType.number),
+              _buildEditField("Weight (kg)", weightController, keyboardType: const TextInputType.numberWithOptions(decimal: true)),
+              _buildEditField("Height (cm)", heightController, keyboardType: const TextInputType.numberWithOptions(decimal: true)),
+              _buildEditField("Heart Rate (bpm)", hrController, keyboardType: TextInputType.number),
+              _buildEditField("Sleep (e.g. 7h 20m)", sleepController),
+              _buildEditField("Daily Steps", stepsController, keyboardType: TextInputType.number),
             ],
           ),
         ),
@@ -171,15 +192,26 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _updateProfile({
-                "name": nameController.text,
-                "age": ageController.text,
-                "weight": weightController.text,
-                "height": heightController.text,
-                "heart_rate": hrController.text,
-                "sleep": sleepController.text,
-                "steps": stepsController.text,
-              });
+              
+              // Safely parse numerical values
+              int? ageVal = int.tryParse(ageController.text);
+              double? weightVal = double.tryParse(weightController.text);
+              double? heightVal = double.tryParse(heightController.text);
+              int? hrVal = int.tryParse(hrController.text);
+              int? stepsVal = int.tryParse(stepsController.text);
+
+              Map<String, dynamic> updatePayload = {
+                "name": nameController.text.isNotEmpty ? nameController.text : null,
+                "sleep": sleepController.text.isNotEmpty ? sleepController.text : null,
+              };
+
+              if (ageVal != null) updatePayload["age"] = ageVal;
+              if (weightVal != null) updatePayload["weight"] = weightVal;
+              if (heightVal != null) updatePayload["height"] = heightVal;
+              if (hrVal != null) updatePayload["heart_rate"] = hrVal;
+              if (stepsVal != null) updatePayload["steps"] = stepsVal;
+
+              _updateProfile(updatePayload);
             },
             child: const Text("Save"),
           ),
@@ -306,11 +338,12 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
     );
   }
 
-  Widget _buildEditField(String label, TextEditingController controller) {
+  Widget _buildEditField(String label, TextEditingController controller, {TextInputType? keyboardType}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: controller,
+        keyboardType: keyboardType,
         decoration: InputDecoration(
           labelText: label,
           labelStyle: TextStyle(color: widget.isDark ? Colors.white70 : Colors.black54),
