@@ -228,6 +228,36 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
     );
   }
 
+  Future<void> _requestPasswordReset() async {
+    setState(() => _isLoading = true);
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/request-password-reset'),
+        headers: {
+          "Authorization": "Bearer ${widget.authToken}",
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Password reset email sent! Please check your inbox.")),
+          );
+        }
+      } else {
+        throw Exception("Server error");
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Failed to send reset email. Please try again.")),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
   void _showPrivacyDialog() {
     showDialog(
       context: context,
@@ -253,7 +283,7 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
                 title: const Text("Change Password", style: TextStyle(color: Color(0xFF007AFF))),
                 onTap: () {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Password reset email sent!")));
+                  _requestPasswordReset();
                 },
               ),
             ],
