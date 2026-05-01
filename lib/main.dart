@@ -13,6 +13,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'map_page.dart';
+import 'profile_dashboard.dart';
 
 // ─────────────────────────────────────────────────────────────
 //  Entry
@@ -845,8 +846,8 @@ class _MediAgentAppState extends State<MediAgentApp>
   // ── Dropdown Menu Overlay ──────────────────────────────────
   Widget _buildDropMenu() {
     final items = <Widget>[];
-    // Adjust total count: skip scan history for guests
-    int totalItems = (_isLoggedIn ? 5 : (_isGuest ? 3 : 4)) + (_wallpaperFile != null ? 1 : 0) + (_isGuest ? 1 : 0);
+    // Adjust total count for staggered animations
+    int totalItems = (_isLoggedIn ? 7 : (_isGuest ? 4 : 3)) + (_wallpaperFile != null ? 1 : 0);
     int idx = 0;
 
     // ── User profile or Sign In ──
@@ -854,58 +855,80 @@ class _MediAgentAppState extends State<MediAgentApp>
       items.add(_staggeredMenuItem(
         index: idx++,
         total: totalItems,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF007AFF), Color(0xFF5856D6)],
-                  ),
-                ),
-                child: Center(
-                  child: Text(
-                    _userName.isNotEmpty ? _userName[0].toUpperCase() : '?',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _userName,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: _isDark ? Colors.white : Colors.black87,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () async {
+              _toggleMenu();
+              final prefs = await SharedPreferences.getInstance();
+              final token = prefs.getString('auth_token') ?? '';
+              if (!mounted) return;
+              Navigator.of(context).push(
+                _smoothPageRoute(ProfileDashboard(
+                  isDark: _isDark,
+                  userName: _userName,
+                  userEmail: _userEmail,
+                  authToken: token,
+                  onSignOut: _handleSignOut,
+                )),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF007AFF), Color(0xFF5856D6)],
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    Text(
-                      _userEmail,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: _isDark ? Colors.white38 : Colors.black45,
+                    child: Center(
+                      child: Text(
+                        _userName.isNotEmpty ? _userName[0].toUpperCase() : '?',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _userName,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: _isDark ? Colors.white : Colors.black87,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          _userEmail,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: _isDark ? Colors.white38 : Colors.black45,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, size: 16, color: _isDark ? Colors.white24 : Colors.black26),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ));
@@ -916,12 +939,22 @@ class _MediAgentAppState extends State<MediAgentApp>
         index: idx++,
         total: totalItems,
         child: _menuItem(
-          icon: Icons.logout_rounded,
-          title: "Sign Out",
-          color: const Color(0xFFFF3B30),
-          onTap: () {
+          icon: Icons.dashboard_customize_rounded,
+          title: "Profile Dashboard",
+          onTap: () async {
             _toggleMenu();
-            _handleSignOut();
+            final prefs = await SharedPreferences.getInstance();
+            final token = prefs.getString('auth_token') ?? '';
+            if (!mounted) return;
+            Navigator.of(context).push(
+              _smoothPageRoute(ProfileDashboard(
+                isDark: _isDark,
+                userName: _userName,
+                userEmail: _userEmail,
+                authToken: token,
+                onSignOut: _handleSignOut,
+              )),
+            );
           },
         ),
       ));
