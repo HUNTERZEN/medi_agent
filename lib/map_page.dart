@@ -18,6 +18,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
   Position? _currentPosition;
   final Set<Marker> _markers = {};
   bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -27,26 +28,63 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
 
   Future<void> _initLocation() async {
     try {
+      // Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = "Location services are disabled. Please enable them in settings.";
+        });
+        return;
+      }
+
+      // Check for permissions
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = "Location permissions are denied.";
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = "Location permissions are permanently denied.";
+        });
+        return;
+      }
+
       Position position = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high);
+      
+      if (!mounted) return;
+
       setState(() {
         _currentPosition = position;
-        _isLoading = false;
+        _errorMessage = null;
       });
+      
       _fetchNearbyHospitals(position);
     } catch (e) {
-      setState(() => _isLoading = false);
+      debugPrint("Error initializing location: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Could not get your location")),
-        );
+        setState(() {
+          _isLoading = false;
+          _errorMessage = "Could not determine your location. Please try again.";
+        });
       }
     }
   }
 
   Future<void> _fetchNearbyHospitals(Position pos) async {
     setState(() => _isLoading = true);
-    // Increased radius to 10km (10000m) for better results
+    
+    // Using 10km radius
     final String query = """
     [out:json];
     (
@@ -65,6 +103,8 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
         final data = json.decode(response.body);
         final List elements = data['elements'];
 
+        if (!mounted) return;
+
         setState(() {
           _markers.clear();
           // Add current location marker (Azure blue)
@@ -76,12 +116,6 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
               icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
             ),
           );
-
-          if (elements.isEmpty && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("No hospitals found within 10km of your location.")),
-            );
-          }
 
           for (var element in elements) {
             double lat = element['lat'] ?? element['center']['lat'];
@@ -102,8 +136,11 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
           _isLoading = false;
         });
         
-        // Fit all markers in view if there are hospitals
-        if (elements.isNotEmpty && _mapController != null) {
+        if (elements.isEmpty && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("No hospitals found within 10km.")),
+          );
+        } else {
           _fitMarkers();
         }
       } else {
@@ -111,12 +148,12 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
       }
     } catch (e) {
       debugPrint("Error fetching hospitals: $e");
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _fitMarkers() {
-    if (_markers.isEmpty) return;
+    if (_markers.isEmpty || _mapController == null) return;
     
     double minLat = _markers.first.position.latitude;
     double maxLat = _markers.first.position.latitude;
@@ -136,7 +173,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
           southwest: LatLng(minLat, minLon),
           northeast: LatLng(maxLat, maxLon),
         ),
-        50.0, // Padding
+        70.0, // Padding
       ),
     );
   }
@@ -174,54 +211,117 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
           ),
         ),
       ),
-      body: _isLoading
-          ? Center(
-              child: CircularProgressIndicator(
-                color: const Color(0xFF007AFF),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading && _currentPosition == null) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFF007AFF)));
+    }
+
+    if (_errorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.location_off_rounded, size: 64, color: widget.isDark ? Colors.white24 : Colors.black12),
+              const SizedBox(height: 16),
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: widget.isDark ? Colors.white70 : Colors.black54, fontSize: 16),
               ),
-            )
-          : Stack(
-              children: [
-                GoogleMap(
-                  initialCameraPosition: CameraPosition(
-                    target: LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
-                    zoom: 14,
-                  ),
-                  onMapCreated: (controller) => _mapController = controller,
-                  markers: _markers,
-                  myLocationEnabled: true,
-                  myLocationButtonEnabled: false,
-                  zoomControlsEnabled: false,
-                  mapType: MapType.normal,
-                  style: widget.isDark ? _darkMapStyle : null,
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _initLocation,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF007AFF),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                
-                // Floating Action Buttons
-                Positioned(
-                  bottom: 30,
-                  right: 20,
-                  child: Column(
-                    children: [
-                      _mapActionButton(
-                        icon: Icons.my_location_rounded,
-                        onTap: () {
-                          _mapController?.animateCamera(
-                            CameraUpdate.newLatLng(
-                              LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
-                            ),
-                          );
-                        },
+                child: const Text("Retry", style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Stack(
+      children: [
+        GoogleMap(
+          initialCameraPosition: CameraPosition(
+            target: LatLng(_currentPosition?.latitude ?? 0, _currentPosition?.longitude ?? 0),
+            zoom: 14,
+          ),
+          onMapCreated: (controller) {
+            _mapController = controller;
+            if (_markers.isNotEmpty) _fitMarkers();
+          },
+          markers: _markers,
+          myLocationEnabled: true,
+          myLocationButtonEnabled: false,
+          zoomControlsEnabled: false,
+          mapType: MapType.normal,
+          style: widget.isDark ? _darkMapStyle : null,
+        ),
+        
+        // Floating Action Buttons
+        Positioned(
+          bottom: 30,
+          right: 20,
+          child: Column(
+            children: [
+              _mapActionButton(
+                icon: Icons.my_location_rounded,
+                onTap: () {
+                  if (_currentPosition != null) {
+                    _mapController?.animateCamera(
+                      CameraUpdate.newLatLng(
+                        LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
                       ),
-                      const SizedBox(height: 12),
-                      _mapActionButton(
-                        icon: Icons.refresh_rounded,
-                        onTap: () => _fetchNearbyHospitals(_currentPosition!),
-                      ),
-                    ],
+                    );
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              _mapActionButton(
+                icon: Icons.refresh_rounded,
+                onTap: () => _initLocation(),
+              ),
+            ],
+          ),
+        ),
+
+        if (_isLoading)
+          Positioned(
+            top: 100,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    color: widget.isDark ? Colors.black.withOpacity(0.5) : Colors.white.withOpacity(0.5),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                        const SizedBox(width: 12),
+                        Text("Searching...", style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87)),
+                      ],
+                    ),
                   ),
                 ),
-              ],
+              ),
             ),
+          ),
+      ],
     );
   }
 

@@ -847,7 +847,7 @@ class _MediAgentAppState extends State<MediAgentApp>
   Widget _buildDropMenu() {
     final items = <Widget>[];
     // Adjust total count for staggered animations
-    int totalItems = (_isLoggedIn ? 7 : (_isGuest ? 5 : 4)) + (_wallpaperFile != null ? 1 : 0);
+    int totalItems = (_isLoggedIn ? 7 : (_isGuest ? 4 : 3)) + (_wallpaperFile != null ? 1 : 0);
     int idx = 0;
 
     // ── User profile or Sign In ──
@@ -1020,7 +1020,7 @@ class _MediAgentAppState extends State<MediAgentApp>
 
     items.add(Divider(color: _isDark ? Colors.white24 : Colors.black12, height: 16));
 
-    // History remains restricted to logged-in users
+    // History and Hospitals remain restricted to logged-in users
     if (_isLoggedIn) {
       items.add(_staggeredMenuItem(
         index: idx++,
@@ -1034,23 +1034,22 @@ class _MediAgentAppState extends State<MediAgentApp>
           },
         ),
       ));
-    }
 
-    // Hospitals is now available for everyone
-    items.add(_staggeredMenuItem(
-      index: idx++,
-      total: totalItems,
-      child: _menuItem(
-        icon: Icons.map_rounded,
-        title: "Nearest Hospitals",
-        onTap: () {
-          _toggleMenu();
-          Navigator.of(context).push(
-            _smoothPageRoute(HospitalMapPage(isDark: _isDark)),
-          );
-        },
-      ),
-    ));
+      items.add(_staggeredMenuItem(
+        index: idx++,
+        total: totalItems,
+        child: _menuItem(
+          icon: Icons.map_rounded,
+          title: "Nearest Hospitals",
+          onTap: () {
+            _toggleMenu();
+            Navigator.of(context).push(
+              _smoothPageRoute(HospitalMapPage(isDark: _isDark)),
+            );
+          },
+        ),
+      ));
+    }
 
     items.add(_staggeredMenuItem(
       index: idx++,
