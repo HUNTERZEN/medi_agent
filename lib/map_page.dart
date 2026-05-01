@@ -20,10 +20,8 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
   Set<Marker> _markers = {};
   List<Map<String, dynamic>> _hospitals = [];
   bool _isLoading = true;
-  String? _errorMessage = null;
+  String? _errorMessage;
   final TextEditingController _searchController = TextEditingController();
-  
-  // Tab/Panel state
   bool _isPanelOpen = false;
 
   @override
@@ -59,6 +57,14 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
         }
       }
 
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = "Location permissions are permanently denied.";
+        });
+        return;
+      }
+
       Position position = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high);
       
@@ -69,12 +75,13 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
         _errorMessage = null;
       });
       
+      // Fetch hospitals after getting position
       _fetchNearbyHospitals(position.latitude, position.longitude);
     } catch (e) {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _errorMessage = "Could not determine location.";
+          _errorMessage = "Could not determine your location.";
         });
       }
     }
@@ -83,17 +90,17 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
   Future<void> _fetchNearbyHospitals(double lat, double lon, {String? searchQuery}) async {
     setState(() => _isLoading = true);
     
-    String filter = '["amenity"~"hospital|clinic"]';
+    String nameFilter = "";
     if (searchQuery != null && searchQuery.isNotEmpty) {
-      filter += '["name"~"$searchQuery",i]';
+      nameFilter = '["name"~"$searchQuery",i]';
     }
 
     final String query = """
-    [out:json];
+    [out:json][timeout:25];
     (
-      node$filter(around:10000, $lat, $lon);
-      way$filter(around:10000, $lat, $lon);
-      relation$filter(around:10000, $lat, $lon);
+      node["amenity"~"hospital|clinic"]$nameFilter(around:10000, $lat, $lon);
+      way["amenity"~"hospital|clinic"]$nameFilter(around:10000, $lat, $lon);
+      relation["amenity"~"hospital|clinic"]$nameFilter(around:10000, $lat, $lon);
     );
     out center;
     """;
@@ -101,10 +108,10 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
     final url = Uri.parse("https://overpass-api.de/api/interpreter?data=${Uri.encodeComponent(query)}");
 
     try {
-      final response = await http.get(url);
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final List elements = data['elements'];
+        final List elements = data['elements'] ?? [];
 
         if (!mounted) return;
 
@@ -119,31 +126,38 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
         };
 
         for (var element in elements) {
-          double hLat = element['lat'] ?? element['center']['lat'];
-          double hLon = element['lon'] ?? element['center']['lon'];
-          String name = element['tags']['name'] ?? "Medical Center";
-          String type = element['tags']['amenity'] ?? "hospital";
-          String address = element['tags']['addr:street'] ?? "Nearby";
+          try {
+            double hLat = element['lat'] ?? element['center']['lat'];
+            double hLon = element['lon'] ?? element['center']['lon'];
+            Map<String, dynamic> tags = element['tags'] ?? {};
+            String name = tags['name'] ?? tags['operator'] ?? "Medical Center";
+            String type = tags['amenity'] ?? "hospital";
+            String street = tags['addr:street'] ?? "";
+            String city = tags['addr:city'] ?? "";
+            String address = street.isNotEmpty ? "$street, $city" : "Nearby Facility";
 
-          double distance = Geolocator.distanceBetween(lat, lon, hLat, hLon) / 1000;
+            double distance = Geolocator.distanceBetween(lat, lon, hLat, hLon) / 1000;
 
-          tempHospitals.add({
-            'name': name,
-            'type': type,
-            'lat': hLat,
-            'lon': hLon,
-            'distance': distance,
-            'address': address,
-          });
+            tempHospitals.add({
+              'name': name,
+              'type': type,
+              'lat': hLat,
+              'lon': hLon,
+              'distance': distance,
+              'address': address,
+            });
 
-          tempMarkers.add(
-            Marker(
-              markerId: MarkerId(element['id'].toString()),
-              position: LatLng(hLat, hLon),
-              infoWindow: InfoWindow(title: name, snippet: "${distance.toStringAsFixed(1)} km away"),
-              onTap: () => _focusHospital(hLat, hLon),
-            ),
-          );
+            tempMarkers.add(
+              Marker(
+                markerId: MarkerId(element['id'].toString()),
+                position: LatLng(hLat, hLon),
+                infoWindow: InfoWindow(title: name, snippet: "${distance.toStringAsFixed(1)} km away"),
+                onTap: () => _focusHospital(hLat, hLon),
+              ),
+            );
+          } catch (e) {
+            debugPrint("Error parsing element: $e");
+          }
         }
 
         tempHospitals.sort((a, b) => a['distance'].compareTo(b['distance']));
@@ -154,19 +168,39 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
           _isLoading = false;
         });
         
-        if (_hospitals.isNotEmpty) _fitMarkers();
+        if (_hospitals.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("No medical centers found nearby.")),
+          );
+        } else {
+          _fitMarkers();
+        }
+      } else {
+        throw Exception("Server Error");
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Could not fetch nearby centers. Check internet connection.")),
+        );
+      }
     }
   }
 
   void _focusHospital(double lat, double lon) {
-    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(lat, lon), 15));
+    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(lat, lon), 15.5));
   }
 
   void _fitMarkers() {
     if (_markers.isEmpty || _mapController == null) return;
+    
+    // If only current location marker is present, don't fit bounds
+    if (_markers.length == 1) {
+      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(_markers.first.position, 14));
+      return;
+    }
+
     double minLat = _markers.first.position.latitude;
     double maxLat = _markers.first.position.latitude;
     double minLon = _markers.first.position.longitude;
@@ -182,7 +216,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
     _mapController?.animateCamera(
       CameraUpdate.newLatLngBounds(
         LatLngBounds(southwest: LatLng(minLat, minLon), northeast: LatLng(maxLat, maxLon)),
-        70.0,
+        80.0,
       ),
     );
   }
@@ -199,41 +233,48 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
+      backgroundColor: widget.isDark ? Colors.black : Colors.white,
       body: Stack(
         children: [
-          GoogleMap(
-            initialCameraPosition: CameraPosition(
-              target: LatLng(_currentPosition?.latitude ?? 0, _currentPosition?.longitude ?? 0),
-              zoom: 14,
-            ),
-            onMapCreated: (controller) {
-              _mapController = controller;
-              if (_markers.isNotEmpty) _fitMarkers();
-            },
-            markers: _markers,
-            myLocationEnabled: true,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            style: widget.isDark ? _darkMapStyle : null,
-          ),
+          // The Map Layer
+          _currentPosition == null && _errorMessage == null
+              ? const Center(child: CircularProgressIndicator(color: Color(0xFF007AFF)))
+              : GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: LatLng(_currentPosition?.latitude ?? 0, _currentPosition?.longitude ?? 0),
+                    zoom: 14,
+                  ),
+                  onMapCreated: (controller) {
+                    _mapController = controller;
+                    if (_markers.isNotEmpty) _fitMarkers();
+                  },
+                  markers: _markers,
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: false,
+                  compassEnabled: false,
+                  mapToolbarEnabled: false,
+                  style: widget.isDark ? _darkMapStyle : null,
+                ),
 
-          // Search Bar
+          // Search Overlay
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Column(
-                children: [
-                  _frostedSearch(),
-                ],
-              ),
+              child: _frostedSearch(),
             ),
           ),
 
-          // Mini Tab / Box at the bottom
-          _buildMiniTab(),
+          // Error Overlay
+          if (_errorMessage != null)
+            _buildErrorState(),
 
-          // Loading Indicator
-          if (_isLoading)
+          // Mini Tab / Result Box
+          if (_currentPosition != null && _errorMessage == null)
+            _buildMiniTab(),
+
+          // Loading Overlay (Overlay during fetch)
+          if (_isLoading && _currentPosition != null)
             Positioned(
               top: 150,
               left: 0,
@@ -241,6 +282,41 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
               child: Center(child: _frostedLoading()),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.all(30),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: widget.isDark ? Colors.black.withOpacity(0.8) : Colors.white.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.red.withOpacity(0.3)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.location_off_rounded, color: Colors.redAccent, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87, fontSize: 16),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _initLocation,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF007AFF),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text("Try Again", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -268,7 +344,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
                   controller: _searchController,
                   style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87),
                   decoration: InputDecoration(
-                    hintText: "Search hospitals or clinics...",
+                    hintText: "Search medical centers...",
                     hintStyle: TextStyle(color: widget.isDark ? Colors.white38 : Colors.black38),
                     border: InputBorder.none,
                   ),
@@ -296,15 +372,14 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
 
   Widget _buildMiniTab() {
     return AnimatedPositioned(
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOutCubic,
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.fastOutSlowIn,
       bottom: 20,
       left: 16,
       right: 16,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // The Mini Tab Header
           GestureDetector(
             onTap: () => setState(() => _isPanelOpen = !_isPanelOpen),
             child: ClipRRect(
@@ -320,7 +395,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.local_hospital_rounded, color: const Color(0xFF007AFF), size: 22),
+                      const Icon(Icons.local_hospital_rounded, color: Color(0xFF007AFF), size: 22),
                       const SizedBox(width: 12),
                       Text(
                         "Nearby Centers",
@@ -328,17 +403,17 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
                       ),
                       const Spacer(),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: const Color(0xFF007AFF).withOpacity(0.1),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           "${_hospitals.length}",
-                          style: const TextStyle(color: Color(0xFF007AFF), fontWeight: FontWeight.bold, fontSize: 12),
+                          style: const TextStyle(color: Color(0xFF007AFF), fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
                       Icon(
                         _isPanelOpen ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
                         color: Colors.grey,
@@ -350,31 +425,31 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
             ),
           ),
           
-          // The Expandable List Content
           if (_isPanelOpen) ...[
             const SizedBox(height: 10),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              height: 280, // Fixed height for the "box"
+            Container(
+              height: 280,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(24),
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: widget.isDark ? const Color(0xFF1A1A2E).withOpacity(0.7) : Colors.white.withOpacity(0.8),
+                      color: widget.isDark ? const Color(0xFF1A1A2E).withOpacity(0.7) : Colors.white.withOpacity(0.85),
                       borderRadius: BorderRadius.circular(24),
                       border: Border.all(color: widget.isDark ? Colors.white10 : Colors.black12),
                     ),
-                    child: ListView.builder(
-                      padding: EdgeInsets.zero,
-                      itemCount: _hospitals.length,
-                      itemBuilder: (context, index) {
-                        final h = _hospitals[index];
-                        return _hospitalTile(h);
-                      },
-                    ),
+                    child: _hospitals.isEmpty 
+                      ? Center(child: Text("No results", style: TextStyle(color: widget.isDark ? Colors.white38 : Colors.black38)))
+                      : ListView.builder(
+                          padding: EdgeInsets.zero,
+                          itemCount: _hospitals.length,
+                          itemBuilder: (context, index) {
+                            final h = _hospitals[index];
+                            return _hospitalTile(h);
+                          },
+                        ),
                   ),
                 ),
               ),
@@ -387,7 +462,9 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
 
   Widget _hospitalTile(Map<String, dynamic> h) {
     return GestureDetector(
-      onTap: () => _focusHospital(h['lat'], h['lon']),
+      onTap: () {
+        _focusHospital(h['lat'], h['lon']);
+      },
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(12),
@@ -397,10 +474,17 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
         ),
         child: Row(
           children: [
-            Icon(
-              h['type'] == 'hospital' ? Icons.local_hospital_rounded : Icons.medical_services_rounded,
-              color: const Color(0xFF007AFF),
-              size: 20,
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF007AFF).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                h['type'] == 'hospital' ? Icons.local_hospital_rounded : Icons.medical_services_rounded,
+                color: const Color(0xFF007AFF),
+                size: 18,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -421,7 +505,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.directions_rounded, color: Color(0xFF30D158), size: 22),
+              icon: const Icon(Icons.directions_rounded, color: Color(0xFF30D158), size: 24),
               onPressed: () => _openDirections(h['lat'], h['lon']),
             ),
           ],
@@ -436,14 +520,17 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          color: widget.isDark ? Colors.black.withOpacity(0.5) : Colors.white.withOpacity(0.5),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          decoration: BoxDecoration(
+            color: widget.isDark ? Colors.black.withOpacity(0.6) : Colors.white.withOpacity(0.6),
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF007AFF))),
+              const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.5, color: Color(0xFF007AFF))),
               const SizedBox(width: 12),
-              Text("Finding centers...", style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87)),
+              Text("Updating results...", style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.w600)),
             ],
           ),
         ),
