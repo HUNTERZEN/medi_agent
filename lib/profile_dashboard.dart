@@ -39,6 +39,14 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
   String _sleep = "--";
   String _steps = "0";
 
+  // Notifications
+  bool _emailNotifications = true;
+  bool _pushNotifications = true;
+
+  // Privacy
+  bool _publicProfile = false;
+  bool _twoFactorAuth = false;
+
   final String _baseUrl = 'https://medi-agent-ser.onrender.com';
 
   @override
@@ -81,6 +89,10 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
           _heartRate = data['heart_rate'].toString().isNotEmpty ? data['heart_rate'] : "--";
           _sleep = data['sleep'].toString().isNotEmpty ? data['sleep'] : "--";
           _steps = data['steps'].toString().isNotEmpty ? data['steps'] : "0";
+          _emailNotifications = data['email_notifications'] ?? true;
+          _pushNotifications = data['push_notifications'] ?? true;
+          _publicProfile = data['public_profile'] ?? false;
+          _twoFactorAuth = data['two_factor_auth'] ?? false;
           _isLoading = false;
         });
       }
@@ -90,7 +102,7 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
     }
   }
 
-  Future<void> _updateProfile(Map<String, String> updates) async {
+  Future<void> _updateProfile(Map<String, dynamic> updates) async {
     setState(() => _isLoading = true);
     try {
       final response = await http.post(
@@ -106,7 +118,7 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
         await _fetchProfile();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Profile updated successfully!")),
+            const SnackBar(content: Text("Settings updated successfully!")),
           );
         }
       }
@@ -172,6 +184,94 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
             child: const Text("Save"),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showNotificationsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Notifications"),
+          backgroundColor: widget.isDark ? const Color(0xFF1C1C2E) : Colors.white,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                title: Text("Email Notifications", style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87)),
+                value: _emailNotifications,
+                onChanged: (val) => setDialogState(() => _emailNotifications = val),
+              ),
+              SwitchListTile(
+                title: Text("Push Notifications", style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87)),
+                value: _pushNotifications,
+                onChanged: (val) => setDialogState(() => _pushNotifications = val),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _updateProfile({
+                  "email_notifications": _emailNotifications,
+                  "push_notifications": _pushNotifications,
+                });
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPrivacyDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Privacy & Security"),
+          backgroundColor: widget.isDark ? const Color(0xFF1C1C2E) : Colors.white,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                title: Text("Public Profile", style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87)),
+                value: _publicProfile,
+                onChanged: (val) => setDialogState(() => _publicProfile = val),
+              ),
+              SwitchListTile(
+                title: Text("Two-Factor Auth", style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87)),
+                value: _twoFactorAuth,
+                onChanged: (val) => setDialogState(() => _twoFactorAuth = val),
+              ),
+              const Divider(),
+              ListTile(
+                title: const Text("Change Password", style: TextStyle(color: Color(0xFF007AFF))),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Password reset email sent!")));
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _updateProfile({
+                  "public_profile": _publicProfile,
+                  "two_factor_auth": _twoFactorAuth,
+                });
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -415,8 +515,8 @@ class _ProfileDashboardState extends State<ProfileDashboard> {
                     child: Column(
                       children: [
                         _settingTile(Icons.person_outline_rounded, "Edit Profile", _showEditDialog),
-                        _settingTile(Icons.notifications_none_rounded, "Notifications", () {}),
-                        _settingTile(Icons.security_rounded, "Privacy & Security", () {}),
+                        _settingTile(Icons.notifications_none_rounded, "Notifications", _showNotificationsDialog),
+                        _settingTile(Icons.security_rounded, "Privacy & Security", _showPrivacyDialog),
                         _settingTile(Icons.help_outline_rounded, "Help & Support", () {}),
                         _settingTile(
                           Icons.logout_rounded,
