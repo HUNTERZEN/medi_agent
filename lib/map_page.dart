@@ -88,10 +88,14 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
   }
 
   Future<void> _fetchNearbyHospitals(double lat, double lon, {String? searchQuery}) async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     
     String nameFilter = "";
     if (searchQuery != null && searchQuery.isNotEmpty) {
+      // Use case-insensitive regex for broader matching
       nameFilter = '["name"~"$searchQuery",i]';
     }
 
@@ -105,86 +109,106 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
     out center;
     """;
 
-    final url = Uri.parse("https://overpass-api.de/api/interpreter?data=${Uri.encodeComponent(query)}");
+    // List of reliable Overpass API mirrors
+    final List<String> mirrors = [
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://overpass.osm.ch/api/interpreter",
+    ];
 
-    try {
-      final response = await http.get(url).timeout(const Duration(seconds: 20));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List elements = data['elements'] ?? [];
+    bool success = false;
+    
+    for (String baseUrl in mirrors) {
+      if (success) break;
+      
+      try {
+        debugPrint("Trying Overpass mirror: $baseUrl");
+        final url = Uri.parse("$baseUrl?data=${Uri.encodeComponent(query)}");
+        final response = await http.get(url).timeout(const Duration(seconds: 12));
 
-        if (!mounted) return;
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final List elements = data['elements'] ?? [];
 
-        List<Map<String, dynamic>> tempHospitals = [];
-        Set<Marker> tempMarkers = {
-          Marker(
-            markerId: const MarkerId("current_pos"),
-            position: LatLng(lat, lon),
-            infoWindow: const InfoWindow(title: "Your Location"),
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          ),
-        };
+          if (!mounted) return;
 
-        for (var element in elements) {
-          try {
-            double hLat = element['lat'] ?? element['center']['lat'];
-            double hLon = element['lon'] ?? element['center']['lon'];
-            Map<String, dynamic> tags = element['tags'] ?? {};
-            String name = tags['name'] ?? tags['operator'] ?? "Medical Center";
-            String type = tags['amenity'] ?? "hospital";
-            String street = tags['addr:street'] ?? "";
-            String city = tags['addr:city'] ?? "";
-            String address = street.isNotEmpty ? "$street, $city" : "Nearby Facility";
+          List<Map<String, dynamic>> tempHospitals = [];
+          Set<Marker> tempMarkers = {
+            Marker(
+              markerId: const MarkerId("current_pos"),
+              position: LatLng(lat, lon),
+              infoWindow: const InfoWindow(title: "Your Location"),
+              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+            ),
+          };
 
-            double distance = Geolocator.distanceBetween(lat, lon, hLat, hLon) / 1000;
+          for (var element in elements) {
+            try {
+              double hLat = element['lat'] ?? element['center']['lat'];
+              double hLon = element['lon'] ?? element['center']['lon'];
+              Map<String, dynamic> tags = element['tags'] ?? {};
+              String name = tags['name'] ?? tags['operator'] ?? "Medical Center";
+              String type = tags['amenity'] ?? "hospital";
+              String street = tags['addr:street'] ?? "";
+              String city = tags['addr:city'] ?? "";
+              String address = street.isNotEmpty ? "$street, $city" : "Nearby Facility";
 
-            tempHospitals.add({
-              'name': name,
-              'type': type,
-              'lat': hLat,
-              'lon': hLon,
-              'distance': distance,
-              'address': address,
-            });
+              double distance = Geolocator.distanceBetween(lat, lon, hLat, hLon) / 1000;
 
-            tempMarkers.add(
-              Marker(
-                markerId: MarkerId(element['id'].toString()),
-                position: LatLng(hLat, hLon),
-                infoWindow: InfoWindow(title: name, snippet: "${distance.toStringAsFixed(1)} km away"),
-                onTap: () => _focusHospital(hLat, hLon),
-              ),
-            );
-          } catch (e) {
-            debugPrint("Error parsing element: $e");
+              tempHospitals.add({
+                'name': name,
+                'type': type,
+                'lat': hLat,
+                'lon': hLon,
+                'distance': distance,
+                'address': address,
+              });
+
+              tempMarkers.add(
+                Marker(
+                  markerId: MarkerId(element['id'].toString()),
+                  position: LatLng(hLat, hLon),
+                  infoWindow: InfoWindow(title: name, snippet: "${distance.toStringAsFixed(1)} km away"),
+                  onTap: () => _focusHospital(hLat, hLon),
+                ),
+              );
+            } catch (e) {
+              continue;
+            }
           }
-        }
 
-        tempHospitals.sort((a, b) => a['distance'].compareTo(b['distance']));
+          tempHospitals.sort((a, b) => a['distance'].compareTo(b['distance']));
 
-        setState(() {
-          _hospitals = tempHospitals;
-          _markers = tempMarkers;
-          _isLoading = false;
-        });
-        
-        if (_hospitals.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("No medical centers found nearby.")),
-          );
-        } else {
-          _fitMarkers();
+          setState(() {
+            _hospitals = tempHospitals;
+            _markers = tempMarkers;
+            _isLoading = false;
+          });
+          
+          if (_hospitals.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("No centers found for this search.")),
+            );
+          } else {
+            _fitMarkers();
+          }
+          success = true;
+          break;
         }
-      } else {
-        throw Exception("Server Error");
+      } catch (e) {
+        debugPrint("Mirror $baseUrl failed: $e");
+        continue; // Try next mirror
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Could not fetch nearby centers. Check internet connection.")),
-        );
-      }
+    }
+
+    if (!success && mounted) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Search service busy. Please try again in a few seconds."),
+          backgroundColor: Colors.orange,
+        ),
+      );
     }
   }
 
