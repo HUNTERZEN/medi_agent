@@ -1,6 +1,6 @@
 # 🩺 MediAgent — Project Progress Summary
 > **Presentation Document** | AI-Powered Medical Report Analysis & Specialist Finder  
-> Version: **2.1.0** | Platform: **Flutter (Android & iOS)**
+> Version: **3.0.0** | Platform: **Flutter (Android & iOS)**
 
 ---
 
@@ -108,7 +108,7 @@ medi_agent/
 │   └── map_page.dart     # GPS hospital finder with Google Maps
 │
 ├── main.py               # Python FastAPI AI backend (Gemini integration)
-├── pubspec.yaml          # Flutter dependencies & app config (v2.1.0)
+├── pubspec.yaml          # Flutter dependencies & app config (v3.0.0)
 ├── app_icon.png          # Custom launcher icon
 ├── android/              # Android-specific configuration
 ├── ios/                  # iOS-specific configuration
@@ -151,6 +151,7 @@ medi_agent/
 | Apr 30, 2026 | 👋 Dynamic greeting based on login status |
 | Apr 30, 2026 | ♻️ Backend warm-up call removed (cleaner startup) |
 | Apr 30, 2026 | ⏱️ Timeout handling added to all server requests |
+| May 1, 2026 | 🔢 Version bumped to 3.0.0 |
 
 ---
 
