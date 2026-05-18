@@ -100,11 +100,14 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
     }
 
     final String query = """
-    [out:json][timeout:25];
+    [out:json][timeout:60];
     (
-      node["amenity"~"hospital|clinic"]$nameFilter(around:10000, $lat, $lon);
-      way["amenity"~"hospital|clinic"]$nameFilter(around:10000, $lat, $lon);
-      relation["amenity"~"hospital|clinic"]$nameFilter(around:10000, $lat, $lon);
+      node["amenity"~"hospital|clinic|doctors|dentist|pharmacy"]$nameFilter(around:60000, $lat, $lon);
+      node["healthcare"~"hospital|clinic|doctor|dentist|pharmacy"]$nameFilter(around:60000, $lat, $lon);
+      way["amenity"~"hospital|clinic|doctors|dentist|pharmacy"]$nameFilter(around:60000, $lat, $lon);
+      way["healthcare"~"hospital|clinic|doctor|dentist|pharmacy"]$nameFilter(around:60000, $lat, $lon);
+      relation["amenity"~"hospital|clinic|doctors|dentist|pharmacy"]$nameFilter(around:60000, $lat, $lon);
+      relation["healthcare"~"hospital|clinic|doctor|dentist|pharmacy"]$nameFilter(around:60000, $lat, $lon);
     );
     out center;
     """;
@@ -114,6 +117,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
       "https://overpass-api.de/api/interpreter",
       "https://overpass.kumi.systems/api/interpreter",
       "https://overpass.osm.ch/api/interpreter",
+      "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     ];
 
     bool success = false;
@@ -124,7 +128,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
       try {
         debugPrint("Trying Overpass mirror: $baseUrl");
         final url = Uri.parse("$baseUrl?data=${Uri.encodeComponent(query)}");
-        final response = await http.get(url).timeout(const Duration(seconds: 12));
+        final response = await http.get(url).timeout(const Duration(seconds: 25));
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
@@ -297,6 +301,28 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
           if (_currentPosition != null && _errorMessage == null)
             _buildMiniTab(),
 
+          // My Location Button
+          if (_currentPosition != null)
+            Positioned(
+              right: 16,
+              bottom: _isPanelOpen ? 370 : 100,
+              child: FloatingActionButton.small(
+                onPressed: () {
+                  if (_currentPosition != null) {
+                    _mapController?.animateCamera(
+                      CameraUpdate.newLatLngZoom(
+                        LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+                        15,
+                      ),
+                    );
+                  }
+                },
+                backgroundColor: widget.isDark ? const Color(0xFF1A1A2E) : Colors.white,
+                foregroundColor: const Color(0xFF007AFF),
+                child: const Icon(Icons.my_location_rounded),
+              ),
+            ),
+
           // Loading Overlay (Overlay during fetch)
           if (_isLoading && _currentPosition != null)
             Positioned(
@@ -347,15 +373,22 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
 
   Widget _frostedSearch() {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(24),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
             color: widget.isDark ? Colors.black.withOpacity(0.4) : Colors.white.withOpacity(0.7),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(24),
             border: Border.all(color: widget.isDark ? Colors.white10 : Colors.black12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           child: Row(
             children: [
@@ -366,12 +399,14 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
               Expanded(
                 child: TextField(
                   controller: _searchController,
-                  style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87),
+                  style: TextStyle(color: widget.isDark ? Colors.white : Colors.black87, fontSize: 15),
                   decoration: InputDecoration(
                     hintText: "Search medical centers...",
-                    hintStyle: TextStyle(color: widget.isDark ? Colors.white38 : Colors.black38),
+                    hintStyle: TextStyle(color: widget.isDark ? Colors.white38 : Colors.black38, fontSize: 15),
                     border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
                   ),
+                  onChanged: (val) => setState(() {}),
                   onSubmitted: (val) {
                     if (_currentPosition != null) {
                       _fetchNearbyHospitals(_currentPosition!.latitude, _currentPosition!.longitude, searchQuery: val);
@@ -379,13 +414,31 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
                   },
                 ),
               ),
-              IconButton(
-                icon: Icon(Icons.search_rounded, color: widget.isDark ? Colors.white70 : Colors.black54),
-                onPressed: () {
-                  if (_currentPosition != null) {
-                    _fetchNearbyHospitals(_currentPosition!.latitude, _currentPosition!.longitude, searchQuery: _searchController.text);
-                  }
-                },
+              if (_searchController.text.isNotEmpty)
+                IconButton(
+                  icon: Icon(Icons.close_rounded, color: widget.isDark ? Colors.white54 : Colors.black54, size: 20),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() {});
+                    if (_currentPosition != null) {
+                      _fetchNearbyHospitals(_currentPosition!.latitude, _currentPosition!.longitude);
+                    }
+                  },
+                ),
+              Container(
+                margin: const EdgeInsets.only(right: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF007AFF),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.search_rounded, color: Colors.white, size: 20),
+                  onPressed: () {
+                    if (_currentPosition != null) {
+                      _fetchNearbyHospitals(_currentPosition!.latitude, _currentPosition!.longitude, searchQuery: _searchController.text);
+                    }
+                  },
+                ),
               ),
             ],
           ),
@@ -396,9 +449,9 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
 
   Widget _buildMiniTab() {
     return AnimatedPositioned(
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.fastOutSlowIn,
-      bottom: 20,
+      duration: const Duration(milliseconds: 600),
+      curve: Curves.fastLinearToSlowEaseIn,
+      bottom: 24,
       left: 16,
       right: 16,
       child: Column(
@@ -407,36 +460,47 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
           GestureDetector(
             onTap: () => setState(() => _isPanelOpen = !_isPanelOpen),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(24),
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                   decoration: BoxDecoration(
-                    color: widget.isDark ? const Color(0xFF1A1A2E).withOpacity(0.8) : Colors.white.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(20),
+                    color: widget.isDark ? const Color(0xFF1A1A2E).withOpacity(0.85) : Colors.white.withOpacity(0.95),
+                    borderRadius: BorderRadius.circular(24),
                     border: Border.all(color: widget.isDark ? Colors.white10 : Colors.black12),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, -5)),
+                    ],
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.local_hospital_rounded, color: Color(0xFF007AFF), size: 22),
-                      const SizedBox(width: 12),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF007AFF).withOpacity(0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.local_hospital_rounded, color: Color(0xFF007AFF), size: 20),
+                      ),
+                      const SizedBox(width: 14),
                       Text(
                         "Nearby Centers",
-                        style: TextStyle(fontWeight: FontWeight.bold, color: widget.isDark ? Colors.white : Colors.black87),
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: widget.isDark ? Colors.white : Colors.black87),
                       ),
                       const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF007AFF).withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(10),
+                      if (!_isPanelOpen)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF007AFF).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            "${_hospitals.length}",
+                            style: const TextStyle(color: Color(0xFF007AFF), fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
                         ),
-                        child: Text(
-                          "${_hospitals.length}",
-                          style: const TextStyle(color: Color(0xFF007AFF), fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                      ),
                       const SizedBox(width: 10),
                       Icon(
                         _isPanelOpen ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
@@ -450,30 +514,71 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
           ),
           
           if (_isPanelOpen) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Container(
-              height: 280,
+              height: 320,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(28),
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+                  filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
                   child: Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                     decoration: BoxDecoration(
-                      color: widget.isDark ? const Color(0xFF1A1A2E).withOpacity(0.7) : Colors.white.withOpacity(0.85),
-                      borderRadius: BorderRadius.circular(24),
+                      color: widget.isDark ? const Color(0xFF1A1A2E).withOpacity(0.75) : Colors.white.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(28),
                       border: Border.all(color: widget.isDark ? Colors.white10 : Colors.black12),
                     ),
-                    child: _hospitals.isEmpty 
-                      ? Center(child: Text("No results", style: TextStyle(color: widget.isDark ? Colors.white38 : Colors.black38)))
-                      : ListView.builder(
-                          padding: EdgeInsets.zero,
-                          itemCount: _hospitals.length,
-                          itemBuilder: (context, index) {
-                            final h = _hospitals[index];
-                            return _hospitalTile(h);
-                          },
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                "Found ${_hospitals.length} locations",
+                                style: TextStyle(color: widget.isDark ? Colors.white54 : Colors.black54, fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                              TextButton.icon(
+                                onPressed: () {
+                                  if (_currentPosition != null) {
+                                    _fetchNearbyHospitals(_currentPosition!.latitude, _currentPosition!.longitude);
+                                  }
+                                },
+                                icon: const Icon(Icons.refresh_rounded, size: 16),
+                                label: const Text("Refresh", style: TextStyle(fontSize: 13)),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFF007AFF),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
+                        const Divider(height: 16, thickness: 0.5),
+                        Expanded(
+                          child: _hospitals.isEmpty 
+                            ? Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.search_off_rounded, size: 48, color: widget.isDark ? Colors.white24 : Colors.black26),
+                                  const SizedBox(height: 12),
+                                  Text("No centers found nearby", style: TextStyle(color: widget.isDark ? Colors.white38 : Colors.black38, fontSize: 15)),
+                                  const SizedBox(height: 4),
+                                  Text("Try a different search or area", style: TextStyle(color: widget.isDark ? Colors.white24 : Colors.black26, fontSize: 13)),
+                                ],
+                              )
+                            : ListView.builder(
+                                padding: const EdgeInsets.only(top: 8),
+                                itemCount: _hospitals.length,
+                                itemBuilder: (context, index) {
+                                  final h = _hospitals[index];
+                                  return _hospitalTile(h);
+                                },
+                              ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -490,47 +595,65 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
         _focusHospital(h['lat'], h['lon']);
       },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: widget.isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
-          borderRadius: BorderRadius.circular(16),
+          color: widget.isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: widget.isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05)),
         ),
         child: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFF007AFF).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
+                color: const Color(0xFF007AFF).withOpacity(0.12),
+                borderRadius: BorderRadius.circular(14),
               ),
               child: Icon(
                 h['type'] == 'hospital' ? Icons.local_hospital_rounded : Icons.medical_services_rounded,
                 color: const Color(0xFF007AFF),
-                size: 18,
+                size: 20,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     h['name'],
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: widget.isDark ? Colors.white : Colors.black87),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: widget.isDark ? Colors.white : Colors.black87),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  Text(
-                    "${h['distance'].toStringAsFixed(1)} km · ${h['address']}",
-                    style: const TextStyle(color: Colors.grey, fontSize: 11),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.location_on_rounded, size: 12, color: widget.isDark ? Colors.white38 : Colors.black38),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          "${h['distance'].toStringAsFixed(1)} km · ${h['address']}",
+                          style: TextStyle(color: widget.isDark ? Colors.white38 : Colors.black38, fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.directions_rounded, color: Color(0xFF30D158), size: 24),
-              onPressed: () => _openDirections(h['lat'], h['lon']),
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF30D158).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.directions_rounded, color: Color(0xFF30D158), size: 22),
+                onPressed: () => _openDirections(h['lat'], h['lon']),
+              ),
             ),
           ],
         ),
