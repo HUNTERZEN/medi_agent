@@ -279,8 +279,20 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
 
     final urlString = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lon&travelmode=$googleTravelMode';
     final url = Uri.parse(urlString);
-    if (await canLaunchUrl(url)) {
+    
+    try {
       await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint("Failed to launch Google Maps externally: $e");
+      try {
+        await launchUrl(url, mode: LaunchMode.platformDefault);
+      } catch (err) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Could not open Google Maps navigation.")),
+          );
+        }
+      }
     }
   }
 
@@ -812,7 +824,12 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
 
   Widget _buildMiniTab() {
     if (_selectedHospital != null) {
-      return _buildDirectionsCard();
+      return Positioned(
+        bottom: 24,
+        left: 16,
+        right: 16,
+        child: _buildDirectionsCard(),
+      );
     }
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 600),
