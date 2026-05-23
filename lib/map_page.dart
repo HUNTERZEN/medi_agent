@@ -112,12 +112,12 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
     out center;
     """;
 
-    // List of reliable Overpass API mirrors
+    // List of reliable worldwide Overpass API mirrors
     final List<String> mirrors = [
       "https://overpass-api.de/api/interpreter",
+      "https://lz4.overpass-api.de/api/interpreter",
+      "https://z.overpass-api.de/api/interpreter",
       "https://overpass.kumi.systems/api/interpreter",
-      "https://overpass.osm.ch/api/interpreter",
-      "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     ];
 
     bool success = false;
@@ -128,7 +128,13 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
       try {
         debugPrint("Trying Overpass mirror: $baseUrl");
         final url = Uri.parse("$baseUrl?data=${Uri.encodeComponent(query)}");
-        final response = await http.get(url).timeout(const Duration(seconds: 25));
+        final response = await http.get(
+          url,
+          headers: {
+            'User-Agent': 'MediAgentApp/1.0 (contact: support@mediagent.com)',
+            'Accept': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 25));
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
