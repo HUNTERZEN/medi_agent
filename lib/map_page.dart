@@ -24,6 +24,13 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
   final TextEditingController _searchController = TextEditingController();
   bool _isPanelOpen = false;
 
+  Map<String, dynamic>? _selectedHospital;
+  Set<Polyline> _polylines = {};
+  String _travelMode = 'driving'; // 'driving', 'foot', 'bicycle'
+  String? _routeDuration;
+  String? _routeDistance;
+  bool _isRouteLoading = false;
+
   @override
   void initState() {
     super.initState();
@@ -158,28 +165,39 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
               double hLon = element['lon'] ?? element['center']['lon'];
               Map<String, dynamic> tags = element['tags'] ?? {};
               String name = tags['name'] ?? tags['operator'] ?? "Medical Center";
-              String type = tags['amenity'] ?? "hospital";
+              String type = tags['amenity'] ?? tags['healthcare'] ?? "hospital";
               String street = tags['addr:street'] ?? "";
               String city = tags['addr:city'] ?? "";
               String address = street.isNotEmpty ? "$street, $city" : "Nearby Facility";
 
               double distance = Geolocator.distanceBetween(lat, lon, hLat, hLon) / 1000;
 
-              tempHospitals.add({
+              final Map<String, dynamic> hospitalItem = {
                 'name': name,
                 'type': type,
                 'lat': hLat,
                 'lon': hLon,
                 'distance': distance,
                 'address': address,
-              });
+              };
+              tempHospitals.add(hospitalItem);
+
+              double markerHue = BitmapDescriptor.hueRed;
+              if (type == 'pharmacy') {
+                markerHue = BitmapDescriptor.hueGreen;
+              } else if (type == 'clinic' || type == 'dentist' || type == 'doctors' || type == 'doctor') {
+                markerHue = BitmapDescriptor.hueOrange;
+              }
 
               tempMarkers.add(
                 Marker(
                   markerId: MarkerId(element['id'].toString()),
                   position: LatLng(hLat, hLon),
+                  icon: BitmapDescriptor.defaultMarkerWithHue(markerHue),
                   infoWindow: InfoWindow(title: name, snippet: "${distance.toStringAsFixed(1)} km away"),
-                  onTap: () => _focusHospital(hLat, hLon),
+                  onTap: () {
+                    _selectHospital(hospitalItem);
+                  },
                 ),
               );
             } catch (e) {
@@ -222,10 +240,6 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
     }
   }
 
-  void _focusHospital(double lat, double lon) {
-    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(LatLng(lat, lon), 15.5));
-  }
-
   void _fitMarkers() {
     if (_markers.isEmpty || _mapController == null) return;
     
@@ -256,11 +270,141 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
   }
 
   Future<void> _openDirections(double lat, double lon) async {
-    final urlString = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lon&travelmode=driving';
+    String googleTravelMode = 'driving';
+    if (_travelMode == 'foot') {
+      googleTravelMode = 'walking';
+    } else if (_travelMode == 'bicycle') {
+      googleTravelMode = 'bicycling';
+    }
+
+    final urlString = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lon&travelmode=$googleTravelMode';
     final url = Uri.parse(urlString);
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     }
+  }
+
+  void _selectHospital(Map<String, dynamic> h) {
+    setState(() {
+      _selectedHospital = h;
+      _isPanelOpen = false; // collapse general list to show directions card
+    });
+    _fetchRoute(h['lat'], h['lon']);
+  }
+
+  Future<void> _fetchRoute(double destLat, double destLon) async {
+    if (_currentPosition == null) return;
+    
+    setState(() {
+      _isRouteLoading = true;
+      _polylines.clear();
+      _routeDuration = null;
+      _routeDistance = null;
+    });
+
+    final double startLat = _currentPosition!.latitude;
+    final double startLon = _currentPosition!.longitude;
+    
+    String osrmProfile = 'driving';
+    if (_travelMode == 'foot') {
+      osrmProfile = 'foot';
+    } else if (_travelMode == 'bicycle') {
+      osrmProfile = 'bicycle';
+    }
+
+    final String urlString = 'https://router.project-osrm.org/route/v1/$osrmProfile/$startLon,$startLat;$destLon,$destLat?overview=full&geometries=geojson';
+    
+    try {
+      final response = await http.get(
+        Uri.parse(urlString),
+        headers: {
+          'User-Agent': 'MediAgentApp/1.0 (contact: support@mediagent.com)',
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['code'] == 'Ok' && data['routes'] != null && data['routes'].isNotEmpty) {
+          final route = data['routes'][0];
+          final geometry = route['geometry'];
+          final List coordinates = geometry['coordinates'];
+          
+          final List<LatLng> polylinePoints = coordinates.map((coord) {
+            double lon = coord[0] is int ? (coord[0] as int).toDouble() : coord[0];
+            double lat = coord[1] is int ? (coord[1] as int).toDouble() : coord[1];
+            return LatLng(lat, lon);
+          }).toList();
+
+          final double distanceInMeters = route['distance'] is int ? (route['distance'] as int).toDouble() : route['distance'];
+          final double durationInSeconds = route['duration'] is int ? (route['duration'] as int).toDouble() : route['duration'];
+
+          setState(() {
+            _routeDistance = distanceInMeters >= 1000 
+                ? "${(distanceInMeters / 1000).toStringAsFixed(1)} km"
+                : "${distanceInMeters.toStringAsFixed(0)} m";
+            
+            final double minutes = durationInSeconds / 60;
+            if (minutes >= 60) {
+              final int hours = (minutes / 60).floor();
+              final int remainingMins = (minutes % 60).round();
+              _routeDuration = "${hours}h ${remainingMins}m";
+            } else {
+              _routeDuration = "${minutes.round()} min";
+            }
+
+            _polylines = {
+              Polyline(
+                polylineId: const PolylineId("route"),
+                points: polylinePoints,
+                color: const Color(0xFF007AFF),
+                width: 5,
+                jointType: JointType.round,
+                startCap: Cap.roundCap,
+                endCap: Cap.roundCap,
+              ),
+            };
+            _isRouteLoading = false;
+          });
+
+          _fitRoute(polylinePoints);
+        } else {
+          setState(() {
+            _isRouteLoading = false;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("No route found for this travel mode.")),
+            );
+          });
+        }
+      } else {
+        setState(() => _isRouteLoading = false);
+      }
+    } catch (e) {
+      debugPrint("Error fetching route: $e");
+      setState(() => _isRouteLoading = false);
+    }
+  }
+
+  void _fitRoute(List<LatLng> points) {
+    if (points.isEmpty || _mapController == null) return;
+
+    double minLat = points.first.latitude;
+    double maxLat = points.first.latitude;
+    double minLon = points.first.longitude;
+    double maxLon = points.first.longitude;
+
+    for (var p in points) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLon) minLon = p.longitude;
+      if (p.longitude > maxLon) maxLon = p.longitude;
+    }
+
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(southwest: LatLng(minLat, minLon), northeast: LatLng(maxLat, maxLon)),
+        90.0,
+      ),
+    );
   }
 
   @override
@@ -283,12 +427,21 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
                     if (_markers.isNotEmpty) _fitMarkers();
                   },
                   markers: _markers,
+                  polylines: _polylines,
                   myLocationEnabled: true,
                   myLocationButtonEnabled: false,
                   zoomControlsEnabled: false,
                   compassEnabled: false,
                   mapToolbarEnabled: false,
                   style: widget.isDark ? _darkMapStyle : null,
+                  onTap: (latLng) {
+                    if (_selectedHospital != null) {
+                      setState(() {
+                        _selectedHospital = null;
+                        _polylines.clear();
+                      });
+                    }
+                  },
                 ),
 
           // Search Overlay
@@ -311,7 +464,9 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
           if (_currentPosition != null)
             Positioned(
               right: 16,
-              bottom: _isPanelOpen ? 370 : 100,
+              bottom: _selectedHospital != null 
+                  ? 270 
+                  : (_isPanelOpen ? 370 : 100),
               child: FloatingActionButton.small(
                 onPressed: () {
                   if (_currentPosition != null) {
@@ -453,7 +608,212 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
     );
   }
 
+  Widget _buildTravelModeButton({
+    required String mode,
+    required IconData icon,
+    required String tooltip,
+  }) {
+    final bool isSelected = _travelMode == mode;
+    return GestureDetector(
+      onTap: () {
+        if (_selectedHospital == null || _isRouteLoading) return;
+        setState(() {
+          _travelMode = mode;
+        });
+        _fetchRoute(_selectedHospital!['lat'], _selectedHospital!['lon']);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF007AFF)
+              : (widget.isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.04)),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          color: isSelected
+              ? Colors.white
+              : (widget.isDark ? Colors.white70 : Colors.black54),
+          size: 20,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDirectionsCard() {
+    if (_selectedHospital == null) return const SizedBox.shrink();
+    
+    final h = _selectedHospital!;
+    final String name = h['name'];
+    final String type = h['type'] ?? 'hospital';
+    final String address = h['address'];
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: widget.isDark ? const Color(0xFF1A1A2E).withOpacity(0.85) : Colors.white.withOpacity(0.95),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: widget.isDark ? Colors.white10 : Colors.black12),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 25, offset: const Offset(0, -5)),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF007AFF).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      type == 'hospital' ? Icons.local_hospital_rounded : Icons.medical_services_rounded,
+                      color: const Color(0xFF007AFF),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: widget.isDark ? Colors.white : Colors.black87,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          address,
+                          style: TextStyle(
+                            color: widget.isDark ? Colors.white38 : Colors.black45,
+                            fontSize: 12,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, color: widget.isDark ? Colors.white54 : Colors.black54),
+                    onPressed: () {
+                      setState(() {
+                        _selectedHospital = null;
+                        _polylines.clear();
+                      });
+                    },
+                  ),
+                ],
+              ),
+              const Divider(height: 24, thickness: 0.5),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _isRouteLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF007AFF)),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _routeDuration ?? "Route details...",
+                              style: const TextStyle(
+                                color: Color(0xFF30D158),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _routeDistance ?? "",
+                              style: TextStyle(
+                                color: widget.isDark ? Colors.white60 : Colors.black54,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                  Row(
+                    children: [
+                      _buildTravelModeButton(
+                        mode: 'driving',
+                        icon: Icons.directions_car_rounded,
+                        tooltip: 'Driving',
+                      ),
+                      const SizedBox(width: 8),
+                      _buildTravelModeButton(
+                        mode: 'foot',
+                        icon: Icons.directions_walk_rounded,
+                        tooltip: 'Walking',
+                      ),
+                      const SizedBox(width: 8),
+                      _buildTravelModeButton(
+                        mode: 'bicycle',
+                        icon: Icons.directions_bike_rounded,
+                        tooltip: 'Cycling',
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _openDirections(h['lat'], h['lon']),
+                      icon: const Icon(Icons.navigation_rounded, color: Colors.white),
+                      label: const Text(
+                        "Start Navigation",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF007AFF),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMiniTab() {
+    if (_selectedHospital != null) {
+      return _buildDirectionsCard();
+    }
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 600),
       curve: Curves.fastLinearToSlowEaseIn,
@@ -598,7 +958,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
   Widget _hospitalTile(Map<String, dynamic> h) {
     return GestureDetector(
       onTap: () {
-        _focusHospital(h['lat'], h['lon']);
+        _selectHospital(h);
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
@@ -658,7 +1018,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
               ),
               child: IconButton(
                 icon: const Icon(Icons.directions_rounded, color: Color(0xFF30D158), size: 22),
-                onPressed: () => _openDirections(h['lat'], h['lon']),
+                onPressed: () => _selectHospital(h),
               ),
             ),
           ],
