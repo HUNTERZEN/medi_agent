@@ -169,6 +169,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
               String street = tags['addr:street'] ?? "";
               String city = tags['addr:city'] ?? "";
               String address = street.isNotEmpty ? "$street, $city" : "Nearby Facility";
+              String? phone = tags['phone'] ?? tags['contact:phone'] ?? tags['contact:mobile'];
 
               double distance = Geolocator.distanceBetween(lat, lon, hLat, hLon) / 1000;
 
@@ -179,6 +180,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
                 'lon': hLon,
                 'distance': distance,
                 'address': address,
+                'phone': phone,
               };
               tempHospitals.add(hospitalItem);
 
@@ -292,6 +294,35 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
             const SnackBar(content: Text("Could not open Google Maps navigation.")),
           );
         }
+      }
+    }
+  }
+
+  Future<void> _callHospital(String? phone) async {
+    if (phone == null || phone.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("No phone number available for this hospital."),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+    // Clean phone number: remove spaces, dashes etc.
+    final cleanPhone = phone.replaceAll(RegExp(r'[^\d+]'), '');
+    final url = Uri.parse('tel:$cleanPhone');
+    try {
+      await launchUrl(url);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Could not open phone dialer."),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -477,7 +508,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
             Positioned(
               right: 16,
               bottom: _selectedHospital != null 
-                  ? 270 
+                  ? 330 
                   : (_isPanelOpen ? 370 : 100),
               child: FloatingActionButton.small(
                 onPressed: () {
@@ -661,6 +692,7 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
     final String name = h['name'];
     final String type = h['type'] ?? 'hospital';
     final String address = h['address'];
+    final String? phone = h['phone'];
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
@@ -788,32 +820,63 @@ class _HospitalMapPageState extends State<HospitalMapPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _openDirections(h['lat'], h['lon']),
-                      icon: const Icon(Icons.navigation_rounded, color: Colors.white),
-                      label: const Text(
-                        "Start Navigation",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF007AFF),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        elevation: 0,
-                      ),
+              const SizedBox(height: 16),
+              // Appointment Call Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _callHospital(phone),
+                  icon: Icon(
+                    phone != null ? Icons.phone_rounded : Icons.phone_disabled_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                  label: Text(
+                    phone != null ? "Book Appointment · $phone" : "Book Appointment",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: phone != null
+                        ? const Color(0xFF30D158)
+                        : (widget.isDark ? Colors.white24 : Colors.black26),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              // Navigation Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _openDirections(h['lat'], h['lon']),
+                  icon: const Icon(Icons.navigation_rounded, color: Colors.white, size: 20),
+                  label: const Text(
+                    "Start Navigation",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
                     ),
                   ),
-                ],
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF007AFF),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
               ),
             ],
           ),
