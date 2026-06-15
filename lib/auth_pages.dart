@@ -225,8 +225,10 @@ class _AuthPagesState extends State<AuthPages>
         final body = json.decode(response.body);
         _showSnackBar(body['detail'] ?? "Google sign-in failed", isError: true);
       }
-    } catch (e) {
-      _showSnackBar("Google sign-in error. Please try again.", isError: true);
+    } catch (e, stackTrace) {
+      print("Google Sign-In Exception details: $e");
+      print(stackTrace);
+      _showSnackBar("Google sign-in error: $e. Please try again.", isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
