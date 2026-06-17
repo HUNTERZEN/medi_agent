@@ -127,7 +127,6 @@ class _MediAgentAppState extends State<MediAgentApp>
   void initState() {
     super.initState();
     _loadSavedWallpaper();
-    _loadSavedHistory();
     _loadSavedAuth();
     _loadGuestUsage();
 
@@ -308,11 +307,15 @@ class _MediAgentAppState extends State<MediAgentApp>
         _userEmail = prefs.getString('user_email') ?? '';
         _authProvider = prefs.getString('auth_provider') ?? 'email';
       });
+      // Fetch scan history from server after auth is loaded
+      _loadSavedHistory();
     } else if (guest) {
       setState(() {
         _isGuest = true;
         _isLoggedIn = false;
       });
+      // Load local history for guest
+      _loadSavedHistory();
     }
   }
 
@@ -452,6 +455,7 @@ class _MediAgentAppState extends State<MediAgentApp>
       _userName = '';
       _userEmail = '';
       _authProvider = '';
+      _history.clear();
     });
     // Show auth page again after sign out
     if (mounted) {
