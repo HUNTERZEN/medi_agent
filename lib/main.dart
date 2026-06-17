@@ -97,8 +97,10 @@ class _MediAgentAppState extends State<MediAgentApp>
   bool _isLoading = false;
   bool _isMenuOpen = false;
   File? _wallpaperFile;
-  final List<String> _history = [];
+  final List<Map<String, dynamic>> _history = [];
   final TextEditingController _chatController = TextEditingController();
+
+  final String _baseUrl = 'https://medi-agent-ser.onrender.com';
 
   // ── Auth state ──
   bool _isLoggedIn = false;
@@ -159,15 +161,119 @@ class _MediAgentAppState extends State<MediAgentApp>
   // ── History Persistence ────────────────────────────────────
   Future<void> _loadSavedHistory() async {
     final prefs = await SharedPreferences.getInstance();
-    final List<String>? saved = prefs.getStringList('scan_history');
-    if (saved != null && saved.isNotEmpty) {
-      setState(() => _history.addAll(saved));
+    final token = prefs.getString('auth_token');
+
+    if (token != null && token.isNotEmpty) {
+      // Logged-in user: fetch from server
+      try {
+        final response = await http.get(
+          Uri.parse('$_baseUrl/scans'),
+          headers: {"Authorization": "Bearer $token"},
+        ).timeout(const Duration(seconds: 15));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final List scans = data['scans'] ?? [];
+          setState(() {
+            _history.clear();
+            for (var scan in scans) {
+              _history.add({
+                'id': scan['id'],
+                'result': scan['result'],
+                'preview': scan['preview'] ?? '',
+                'created_at': scan['created_at'] ?? '',
+              });
+            }
+          });
+        }
+      } catch (e) {
+        debugPrint("Error loading scan history from server: $e");
+      }
+    } else {
+      // Guest user: load from local storage
+      final List<String>? saved = prefs.getStringList('scan_history');
+      if (saved != null && saved.isNotEmpty) {
+        setState(() {
+          for (var s in saved) {
+            _history.add({'id': '', 'result': s, 'preview': s.length > 100 ? s.substring(0, 100) : s, 'created_at': ''});
+          }
+        });
+      }
     }
   }
 
-  Future<void> _saveHistory() async {
+  Future<void> _saveScanToServer(String scanResult) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('scan_history', _history);
+    final token = prefs.getString('auth_token');
+
+    if (token != null && token.isNotEmpty) {
+      // Logged-in user: save to server
+      try {
+        final response = await http.post(
+          Uri.parse('$_baseUrl/scans/save'),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer $token",
+          },
+          body: json.encode({"result": scanResult}),
+        ).timeout(const Duration(seconds: 15));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          // Insert at top of history with the server-assigned ID
+          setState(() {
+            _history.insert(0, {
+              'id': data['scan_id'] ?? '',
+              'result': scanResult,
+              'preview': scanResult.length > 100 ? scanResult.substring(0, 100).replaceAll('\n', ' ').trim() : scanResult,
+              'created_at': DateTime.now().toUtc().toIso8601String(),
+            });
+          });
+        }
+      } catch (e) {
+        debugPrint("Error saving scan to server: $e");
+      }
+    } else {
+      // Guest user: save locally
+      setState(() {
+        _history.insert(0, {
+          'id': '',
+          'result': scanResult,
+          'preview': scanResult.length > 100 ? scanResult.substring(0, 100) : scanResult,
+          'created_at': '',
+        });
+      });
+      final List<String> localHistory = _history.map((h) => h['result'] as String).toList();
+      await prefs.setStringList('scan_history', localHistory);
+    }
+  }
+
+  Future<void> _deleteScan(int index) async {
+    final scan = _history[index];
+    final scanId = scan['id'] as String;
+
+    if (scanId.isNotEmpty) {
+      // Delete from server
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token') ?? '';
+      try {
+        await http.delete(
+          Uri.parse('$_baseUrl/scans/$scanId'),
+          headers: {"Authorization": "Bearer $token"},
+        ).timeout(const Duration(seconds: 10));
+      } catch (e) {
+        debugPrint("Error deleting scan from server: $e");
+      }
+    }
+
+    setState(() => _history.removeAt(index));
+
+    // Update local storage for guests
+    if (scanId.isEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      final List<String> localHistory = _history.map((h) => h['result'] as String).toList();
+      await prefs.setStringList('scan_history', localHistory);
+    }
   }
 
   // ── Wallpaper ──────────────────────────────────────────────
@@ -486,9 +592,8 @@ class _MediAgentAppState extends State<MediAgentApp>
         String data = json.decode(response.body)['recommendation'];
         setState(() {
           _result = data;
-          _history.insert(0, data);
         });
-        await _saveHistory();
+        await _saveScanToServer(data);
       } else {
         setState(() => _result = "## ⚠️ Analysis Error\nI couldn't complete the scan (Status: ${response.statusCode}). The server might be busy. Please try again later.");
       }
@@ -691,101 +796,130 @@ class _MediAgentAppState extends State<MediAgentApp>
                             itemCount: _history.length,
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 8),
-                            itemBuilder: (context, i) => Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(16),
-                                onTap: () {
-                                  setState(
-                                      () => _result = _history[i]);
-                                  Navigator.pop(context);
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.all(14),
+                            itemBuilder: (context, i) {
+                              final scan = _history[i];
+                              final result = scan['result'] as String? ?? '';
+                              final preview = scan['preview'] as String? ?? '';
+                              final createdAt = scan['created_at'] as String? ?? '';
+                              String timeLabel = '';
+                              if (createdAt.isNotEmpty) {
+                                try {
+                                  final dt = DateTime.parse(createdAt).toLocal();
+                                  timeLabel = '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+                                } catch (_) {}
+                              }
+
+                              return Dismissible(
+                                key: Key(scan['id']?.toString() ?? 'local_$i'),
+                                direction: DismissDirection.endToStart,
+                                background: Container(
+                                  alignment: Alignment.centerRight,
+                                  padding: const EdgeInsets.only(right: 20),
                                   decoration: BoxDecoration(
-                                    borderRadius:
-                                        BorderRadius.circular(16),
-                                    color: _isDark
-                                        ? Colors.white.withOpacity(0.06)
-                                        : Colors.black.withOpacity(0.03),
+                                    borderRadius: BorderRadius.circular(16),
+                                    color: const Color(0xFFFF3B30).withOpacity(0.15),
                                   ),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                          gradient:
-                                              const LinearGradient(
-                                            colors: [
-                                              Color(0xFF007AFF),
-                                              Color(0xFF5856D6),
-                                            ],
-                                          ),
-                                        ),
-                                        child: Center(
-                                          child: Text(
-                                            "${i + 1}",
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              "Scan Result ${i + 1}",
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 15,
-                                                color: _isDark
-                                                    ? Colors.white
-                                                    : const Color(
-                                                        0xFF1C1C1E),
-                                              ),
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              _history[i].length > 60
-                                                  ? "${_history[i].substring(0, 60)}..."
-                                                  : _history[i],
-                                              maxLines: 1,
-                                              overflow:
-                                                  TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                color: _isDark
-                                                    ? Colors.white
-                                                        .withOpacity(0.5)
-                                                    : Colors.black
-                                                        .withOpacity(0.4),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Icon(
-                                        Icons.chevron_right_rounded,
+                                  child: const Icon(Icons.delete_rounded, color: Color(0xFFFF3B30)),
+                                ),
+                                onDismissed: (_) => _deleteScan(i),
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(16),
+                                    onTap: () {
+                                      setState(() => _result = result);
+                                      Navigator.pop(context);
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.all(14),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(16),
                                         color: _isDark
-                                            ? Colors.white
-                                                .withOpacity(0.3)
-                                            : Colors.black
-                                                .withOpacity(0.2),
+                                            ? Colors.white.withOpacity(0.06)
+                                            : Colors.black.withOpacity(0.03),
                                       ),
-                                    ],
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 40,
+                                            height: 40,
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(12),
+                                              gradient: const LinearGradient(
+                                                colors: [
+                                                  Color(0xFF007AFF),
+                                                  Color(0xFF5856D6),
+                                                ],
+                                              ),
+                                            ),
+                                            child: Center(
+                                              child: Text(
+                                                "${i + 1}",
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w700,
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  "Scan Result ${i + 1}",
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: 15,
+                                                    color: _isDark
+                                                        ? Colors.white
+                                                        : const Color(0xFF1C1C1E),
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  preview.length > 60
+                                                      ? "${preview.substring(0, 60)}..."
+                                                      : preview,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    color: _isDark
+                                                        ? Colors.white.withOpacity(0.5)
+                                                        : Colors.black.withOpacity(0.4),
+                                                  ),
+                                                ),
+                                                if (timeLabel.isNotEmpty) ...[
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    timeLabel,
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: _isDark
+                                                          ? Colors.white.withOpacity(0.3)
+                                                          : Colors.black.withOpacity(0.25),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                          ),
+                                          Icon(
+                                            Icons.chevron_right_rounded,
+                                            color: _isDark
+                                                ? Colors.white.withOpacity(0.3)
+                                                : Colors.black.withOpacity(0.2),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ),
+                              );
+                            },
                           ),
                   ),
                 ],
